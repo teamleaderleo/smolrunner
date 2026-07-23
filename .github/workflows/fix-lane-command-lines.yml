@@ -1,0 +1,71 @@
+name: Fix typed lane command lines
+
+on:
+  push:
+    branches: [feature/typed-lane-commands]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/typed-lane-commands
+          fetch-depth: 1
+
+      - name: Apply line-based corrections
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/lane_command.rs')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          output = []
+          imported = False
+          gid_test = False
+          for line in lines:
+              if line == '        if uid == 0 {':
+                  line = '        if uid == 0 || primary_gid == 0 {'
+              elif line == '                "runner-user UID must be greater than zero",':
+                  line = '                "runner-user UID and primary GID must be greater than zero",'
+              output.append(line)
+              if line == '    use crate::journal::{ExecutionLane, PlannedMutation, Preconditions, RollbackClass};':
+                  output.append('    use crate::process::CommandValue;')
+                  imported = True
+              if line == '            .expect_err("root runner user must fail");':
+                  output.extend([
+                      '        RunnerUserContext::new(account("project-runner"), 1001, 0, "/srv/runner")',
+                      '            .expect_err("root primary group must fail");',
+                  ])
+                  gid_test = True
+          if not imported or not gid_test:
+              raise SystemExit('expected import and primary-GID test anchors')
+          text = '\n'.join(output) + '\n'
+          if text.count('if uid == 0 || primary_gid == 0') != 1:
+              raise SystemExit('runner identity validation was not corrected exactly once')
+          path.write_text(text, encoding='utf-8')
+          PY
+          cargo fmt --all
+          rm -f \
+            .github/workflows/fix-lane-command-lines.yml \
+            .tmp/fix-lane-command-lines
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit corrected source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: tighten typed lane command validation'
+          git push origin HEAD:feature/typed-lane-commands
