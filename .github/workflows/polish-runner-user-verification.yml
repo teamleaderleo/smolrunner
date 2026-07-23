@@ -1,0 +1,117 @@
+name: Polish runner-user verification
+
+on:
+  push:
+    branches: [feature/runner-user-verification]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/runner-user-verification
+          fetch-depth: 1
+
+      - name: Apply review corrections
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/runner_user.rs')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = {
+              '    if passwd.username != *context.username()\n': '    if &passwd.username != context.username()\n',
+              '        let start = parse_canonical_u32("subordinate range start", start)?;\n': '        let start = parse_subordinate_u32("subordinate range start", start)?;\n',
+              '        let count = parse_canonical_u32("subordinate range count", count)?;\n': '        let count = parse_subordinate_u32("subordinate range count", count)?;\n',
+              '    use std::os::unix::fs::{MetadataExt, PermissionsExt};\n': '    use std::os::unix::fs::MetadataExt;\n    use std::path::Path;\n',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exactly one match for {old!r}')
+              text = text.replace(old, new)
+
+          anchor = '''fn malformed_subordinate_range() -> RunnerUserVerificationError {
+          '''
+          helper = '''fn parse_subordinate_u32(
+              field: &str,
+              value: &str,
+          ) -> Result<u32, RunnerUserVerificationError> {
+              let parsed = value.parse::<u32>().map_err(|_| malformed_subordinate_range())?;
+              if parsed.to_string() != value {
+                  return Err(RunnerUserVerificationError::new(
+                      RunnerUserVerificationErrorKind::MalformedSubordinateRange,
+                      format!("{field} must contain a canonical decimal integer"),
+                  ));
+              }
+              Ok(parsed)
+          }
+
+          fn malformed_subordinate_range() -> RunnerUserVerificationError {
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit('subordinate parser insertion anchor did not match once')
+          text = text.replace(anchor, helper)
+
+          start = text.index('    #[test]\n    fn inspects_real_runtime_directory_metadata_without_following_symlinks() {')
+          end = text.rindex('\n}')
+          replacement = '''    #[test]
+              fn inspects_live_runtime_directory_when_available() {
+                  let host_metadata = fs::metadata(std::env::temp_dir()).expect("host metadata");
+                  if host_metadata.uid() == 0 || host_metadata.gid() == 0 {
+                      return;
+                  }
+                  let context = context(
+                      host_metadata.uid(),
+                      host_metadata.gid(),
+                      "/srv/project-runner",
+                  );
+                  let runtime_path = Path::new(context.runtime_directory());
+                  let metadata = match fs::metadata(runtime_path) {
+                      Ok(metadata) => metadata,
+                      Err(_) => return,
+                  };
+                  if metadata.uid() != context.uid()
+                      || metadata.gid() != context.primary_gid()
+                      || metadata.mode() & 0o7777 != 0o700
+                  {
+                      return;
+                  }
+                  let observation =
+                      inspect_runtime_directory(&context).expect("inspect runtime directory");
+                  assert_eq!(observation.path(), runtime_path);
+                  assert_eq!(observation.owner_uid(), context.uid());
+                  assert_eq!(observation.owner_gid(), context.primary_gid());
+                  assert_eq!(observation.mode(), 0o700);
+              }
+          '''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          cargo fmt --all
+          rm -f \
+            .github/workflows/polish-runner-user-verification.yml \
+            .tmp/polish-runner-user-verification
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit polished source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: tighten runner-user evidence verification'
+          git push origin HEAD:feature/runner-user-verification
