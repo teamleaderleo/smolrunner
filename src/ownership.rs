@@ -90,11 +90,7 @@ pub struct ResourceIdentity {
 
 impl ResourceIdentity {
     #[must_use]
-    pub fn new(
-        kind: ResourceKind,
-        locator: impl Into<String>,
-        evidence: ResourceEvidence,
-    ) -> Self {
+    pub fn new(kind: ResourceKind, locator: impl Into<String>, evidence: ResourceEvidence) -> Self {
         Self {
             kind,
             locator: locator.into(),
@@ -331,7 +327,10 @@ fn compare_required_evidence(
     }
 }
 
-fn compare_optional_required(required: &Option<String>, observed: &Option<String>) -> EvidenceMatch {
+fn compare_optional_required(
+    required: &Option<String>,
+    observed: &Option<String>,
+) -> EvidenceMatch {
     match (required, observed) {
         (None, _) => EvidenceMatch::Exact,
         (Some(_), None) => EvidenceMatch::Missing,
@@ -352,7 +351,11 @@ fn validate(
     validate_resource("observed", &observed.identity, &mut problems);
 
     if let Some(marker) = &observed.marker {
-        validate_token("marker.installation_id", &marker.installation_id, &mut problems);
+        validate_token(
+            "marker.installation_id",
+            &marker.installation_id,
+            &mut problems,
+        );
         validate_project("marker.project", &marker.project, &mut problems);
         validate_resource("marker.resource", &marker.resource, &mut problems);
     }
@@ -371,9 +374,7 @@ fn validate_project(field: &str, project: &ProjectIdentity, problems: &mut Vec<S
             .iter()
             .any(|part| part.is_empty() || !is_github_name(part))
     {
-        problems.push(format!(
-            "{field}.repository must be exact OWNER/REPOSITORY"
-        ));
+        problems.push(format!("{field}.repository must be exact OWNER/REPOSITORY"));
     }
 
     if !is_linux_user(&project.runner_user) {
