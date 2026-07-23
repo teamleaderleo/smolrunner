@@ -1,6 +1,7 @@
 pub mod doctor;
 pub mod host;
 pub mod journal;
+pub mod journal_document;
 pub mod manifest;
 pub mod ownership;
 pub mod plan;
