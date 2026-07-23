@@ -19,312 +19,235 @@ jobs:
           ref: feature/linux-state-fault-tests
           fetch-depth: 1
 
-      - name: Apply bounded fault-injection patch
+      - name: Apply marker-based fault-injection patch
         shell: bash
         run: |
           set -Eeuo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('src/linux_state.rs')
-          text = path.read_text(encoding='utf-8')
+          path = Path("src/linux_state.rs")
+          text = path.read_text(encoding="utf-8")
 
-          anchor = '''const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";
+          def replace_once(source: str, old: str, new: str, label: str) -> str:
+              if source.count(old) != 1:
+                  raise SystemExit(f"{label} did not match exactly once")
+              return source.replace(old, new)
 
-          /// Descriptor-relative access to one trusted SmolRunner state root.
-          '''
-          replacement = '''const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";
+          def replace_range(source: str, start: str, end: str, new: str, label: str) -> str:
+              if source.count(start) != 1 or source.count(end) != 1:
+                  raise SystemExit(f"{label} boundaries did not match exactly once")
+              begin = source.index(start)
+              finish = source.index(end, begin)
+              return source[:begin] + new + source[finish:]
 
-          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-          enum PublicationStage {
-              BeforeWrite,
-              BeforeFileSync,
-              BeforeRename,
-              BeforeParentSync,
-          }
+          hook_anchor = 'const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";\n\n'
+          hook_block = '''const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";
 
-          trait PublicationHooks {
-              fn before(&mut self, stage: PublicationStage) -> Result<(), StateStoreError>;
-          }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PublicationStage {
+    BeforeWrite,
+    BeforeFileSync,
+    BeforeRename,
+    BeforeParentSync,
+}
 
-          struct NoPublicationHooks;
+trait PublicationHooks {
+    fn before(&mut self, stage: PublicationStage) -> Result<(), StateStoreError>;
+}
 
-          impl PublicationHooks for NoPublicationHooks {
-              fn before(&mut self, _stage: PublicationStage) -> Result<(), StateStoreError> {
-                  Ok(())
-              }
-          }
+struct NoPublicationHooks;
 
-          /// Descriptor-relative access to one trusted SmolRunner state root.
-          '''
-          if text.count(anchor) != 1:
-              raise SystemExit('publication hook insertion anchor did not match exactly once')
-          text = text.replace(anchor, replacement)
+impl PublicationHooks for NoPublicationHooks {
+    fn before(&mut self, _stage: PublicationStage) -> Result<(), StateStoreError> {
+        Ok(())
+    }
+}
 
-          old = '''    pub fn write_atomic(
-              &mut self,
-              record: &StateRecord,
-          ) -> Result<StateWriteReceipt, StateStoreError> {
-              let _lock = self.acquire_installation_lock(record.path())?;
-              let (parent, file_name) = self.open_required_parent(record.path())?;
-              let disposition = inspect_destination(&parent, file_name)?;
-              let (temporary, temporary_name) = create_temporary_file(&parent)?;
-              let mut temporary_path = TemporaryPath::new(parent.as_fd(), temporary_name);
+'''
+          text = replace_once(text, hook_anchor, hook_block, "publication hook anchor")
 
-              fs::fchmod(&temporary, PRIVATE_FILE_MODE).map_err(|_| {
-                  StateStoreError::public(
-                      StateStoreErrorKind::Io,
-                      "could not set private state-file permissions",
-                  )
-              })?;
-              write_and_sync(temporary, record.bytes())?;
+          write_impl = '''    pub fn write_atomic(
+        &mut self,
+        record: &StateRecord,
+    ) -> Result<StateWriteReceipt, StateStoreError> {
+        let mut hooks = NoPublicationHooks;
+        self.write_atomic_with_hooks(record, &mut hooks)
+    }
 
-              fs::renameat(&parent, temporary_path.name(), &parent, file_name.as_str())
-                  .map_err(map_rename_error)?;
-              temporary_path.disarm();
+    fn write_atomic_with_hooks<H: PublicationHooks>(
+        &mut self,
+        record: &StateRecord,
+        hooks: &mut H,
+    ) -> Result<StateWriteReceipt, StateStoreError> {
+        let _lock = self.acquire_installation_lock(record.path())?;
+        let (parent, file_name) = self.open_required_parent(record.path())?;
+        let disposition = inspect_destination(&parent, file_name)?;
+        let (temporary, temporary_name) = create_temporary_file(&parent)?;
+        let mut temporary_path = TemporaryPath::new(parent.as_fd(), temporary_name);
 
-              fs::fsync(&parent).map_err(|_| {
-                  StateStoreError::public(
-                      StateStoreErrorKind::Io,
-                      "state file was published but its parent directory could not be synchronized",
-                  )
-              })?;
+        fs::fchmod(&temporary, PRIVATE_FILE_MODE).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "could not set private state-file permissions",
+            )
+        })?;
+        let mut temporary_file = File::from(temporary);
+        hooks.before(PublicationStage::BeforeWrite)?;
+        temporary_file.write_all(record.bytes()).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "could not write temporary state file",
+            )
+        })?;
+        hooks.before(PublicationStage::BeforeFileSync)?;
+        fs::fsync(&temporary_file).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "could not synchronize temporary state file",
+            )
+        })?;
+        hooks.before(PublicationStage::BeforeRename)?;
 
-              Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
-          }
-          '''
-          new = '''    pub fn write_atomic(
-              &mut self,
-              record: &StateRecord,
-          ) -> Result<StateWriteReceipt, StateStoreError> {
-              let mut hooks = NoPublicationHooks;
-              self.write_atomic_with_hooks(record, &mut hooks)
-          }
+        fs::renameat(&parent, temporary_path.name(), &parent, file_name.as_str())
+            .map_err(map_rename_error)?;
+        temporary_path.disarm();
 
-              fn write_atomic_with_hooks<H: PublicationHooks>(
-                  &mut self,
-                  record: &StateRecord,
-                  hooks: &mut H,
-              ) -> Result<StateWriteReceipt, StateStoreError> {
-                  let _lock = self.acquire_installation_lock(record.path())?;
-                  let (parent, file_name) = self.open_required_parent(record.path())?;
-                  let disposition = inspect_destination(&parent, file_name)?;
-                  let (temporary, temporary_name) = create_temporary_file(&parent)?;
-                  let mut temporary_path = TemporaryPath::new(parent.as_fd(), temporary_name);
+        hooks.before(PublicationStage::BeforeParentSync)?;
+        fs::fsync(&parent).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "state file was published but its parent directory could not be synchronized",
+            )
+        })?;
 
-                  fs::fchmod(&temporary, PRIVATE_FILE_MODE).map_err(|_| {
-                      StateStoreError::public(
-                          StateStoreErrorKind::Io,
-                          "could not set private state-file permissions",
-                      )
-                  })?;
-                  let mut temporary_file = File::from(temporary);
-                  hooks.before(PublicationStage::BeforeWrite)?;
-                  temporary_file.write_all(record.bytes()).map_err(|_| {
-                      StateStoreError::public(
-                          StateStoreErrorKind::Io,
-                          "could not write temporary state file",
-                      )
-                  })?;
-                  hooks.before(PublicationStage::BeforeFileSync)?;
-                  fs::fsync(&temporary_file).map_err(|_| {
-                      StateStoreError::public(
-                          StateStoreErrorKind::Io,
-                          "could not synchronize temporary state file",
-                      )
-                  })?;
-                  hooks.before(PublicationStage::BeforeRename)?;
+        Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
+    }
 
-                  fs::renameat(&parent, temporary_path.name(), &parent, file_name.as_str())
-                      .map_err(map_rename_error)?;
-                  temporary_path.disarm();
+'''
+          text = replace_range(
+              text,
+              "    pub fn write_atomic(\n",
+              "    fn open_required_parent<'a>(\n",
+              write_impl,
+              "write_atomic implementation",
+          )
+          text = replace_range(
+              text,
+              "fn write_and_sync(\n",
+              "fn verify_directory(\n",
+              "",
+              "write_and_sync helper",
+          )
 
-                  hooks.before(PublicationStage::BeforeParentSync)?;
-                  fs::fsync(&parent).map_err(|_| {
-                      StateStoreError::public(
-                          StateStoreErrorKind::Io,
-                          "state file was published but its parent directory could not be synchronized",
-                      )
-                  })?;
+          old_imports = '''    use crate::state_store::{
+        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
+        StateWriteDisposition,
+    };
 
-                  Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
-              }
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('write_atomic implementation did not match exactly once')
-          text = text.replace(old, new)
+    use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};
+'''
+          new_imports = '''    use crate::state_store::{
+        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreError,
+        StateStoreErrorKind, StateWriteDisposition,
+    };
 
-          old = '''fn write_and_sync(fd: OwnedFd, bytes: &[u8]) -> Result<(), StateStoreError> {
-              let mut file = File::from(fd);
-              file.write_all(bytes).map_err(|_| {
-                  StateStoreError::public(
-                      StateStoreErrorKind::Io,
-                      "could not write temporary state file",
-                  )
-              })?;
-              fs::fsync(&file).map_err(|_| {
-                  StateStoreError::public(
-                      StateStoreErrorKind::Io,
-                      "could not synchronize temporary state file",
-                  )
-              })
-          }
+    use super::{
+        LOCK_FILE_NAME, LinuxStateRoot, PublicationHooks, PublicationStage, TEMP_FILE_PREFIX,
+    };
+'''
+          text = replace_once(text, old_imports, new_imports, "test imports")
 
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('write_and_sync helper did not match exactly once')
-          text = text.replace(old, '')
+          test_block = '''
 
-          old = '''    use crate::state_store::{
-                  MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
-                  StateWriteDisposition,
-              };
+    struct FailAt(PublicationStage);
 
-              use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};
-          '''
-          new = '''    use crate::state_store::{
-                  MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreError,
-                  StateStoreErrorKind, StateWriteDisposition,
-              };
+    impl PublicationHooks for FailAt {
+        fn before(&mut self, stage: PublicationStage) -> Result<(), StateStoreError> {
+            if stage == self.0 {
+                Err(StateStoreError::public(
+                    StateStoreErrorKind::Io,
+                    format!("injected publication failure at {stage:?}"),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
 
-              use super::{
-                  LOCK_FILE_NAME, LinuxStateRoot, PublicationHooks, PublicationStage,
-                  TEMP_FILE_PREFIX,
-              };
-          '''
-          if text.count(old) != 1:
-              raise SystemExit('test import block did not match exactly once')
-          text = text.replace(old, new)
+    fn assert_no_temporary_files(parent: &Path) {
+        assert!(
+            fs::read_dir(parent)
+                .expect("list destination directory")
+                .all(|entry| !entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(TEMP_FILE_PREFIX))
+        );
+    }
 
-          final = '''    #[test]
-              fn incompatible_existing_lock_is_rejected_without_chmod() {
-                  let root = TempTree::new("unsafe-lock");
-                  let parent = create_project_parent(root.path());
-                  let lock_path = parent.join(LOCK_FILE_NAME);
-                  fs::write(&lock_path, b"foreign lock").expect("write foreign lock");
-                  fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o644))
-                      .expect("set foreign lock mode");
+    #[test]
+    fn prepublication_faults_preserve_destination_and_clean_temporary_files() {
+        let root = TempTree::new("fault-before-publish");
+        let parent = create_project_parent(root.path());
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let existing = project_record("example/existing");
+        store.write_atomic(&existing).expect("write existing state");
+        let replacement = project_record("example/replacement");
 
-                  let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
-                  let error = store
-                      .write_atomic(&project_record("example/project"))
-                      .expect_err("broad lock mode must fail");
-                  assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
-                  assert_eq!(
-                      fs::metadata(lock_path).expect("lock metadata").mode() & 0o7777,
-                      0o644
-                  );
-              }
-          }
-          '''
-          expanded = '''    #[test]
-              fn incompatible_existing_lock_is_rejected_without_chmod() {
-                  let root = TempTree::new("unsafe-lock");
-                  let parent = create_project_parent(root.path());
-                  let lock_path = parent.join(LOCK_FILE_NAME);
-                  fs::write(&lock_path, b"foreign lock").expect("write foreign lock");
-                  fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o644))
-                      .expect("set foreign lock mode");
+        for stage in [
+            PublicationStage::BeforeWrite,
+            PublicationStage::BeforeFileSync,
+            PublicationStage::BeforeRename,
+        ] {
+            let error = store
+                .write_atomic_with_hooks(&replacement, &mut FailAt(stage))
+                .expect_err("injected prepublication failure");
+            assert_eq!(error.kind(), StateStoreErrorKind::Io);
+            assert_eq!(
+                store.read(existing.path()).expect("read preserved state"),
+                StateRead::Present(existing.bytes().to_vec())
+            );
+            assert_no_temporary_files(&parent);
+        }
+    }
 
-                  let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
-                  let error = store
-                      .write_atomic(&project_record("example/project"))
-                      .expect_err("broad lock mode must fail");
-                  assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
-                  assert_eq!(
-                      fs::metadata(lock_path).expect("lock metadata").mode() & 0o7777,
-                      0o644
-                  );
-              }
+    #[test]
+    fn parent_sync_fault_reports_error_after_publication() {
+        let root = TempTree::new("fault-parent-sync");
+        let parent = create_project_parent(root.path());
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let existing = project_record("example/existing");
+        store.write_atomic(&existing).expect("write existing state");
+        let replacement = project_record("example/replacement");
 
-              struct FailAt(PublicationStage);
-
-              impl PublicationHooks for FailAt {
-                  fn before(&mut self, stage: PublicationStage) -> Result<(), StateStoreError> {
-                      if stage == self.0 {
-                          Err(StateStoreError::public(
-                              StateStoreErrorKind::Io,
-                              format!("injected publication failure at {stage:?}"),
-                          ))
-                      } else {
-                          Ok(())
-                      }
-                  }
-              }
-
-              fn assert_no_temporary_files(parent: &Path) {
-                  assert!(
-                      fs::read_dir(parent)
-                          .expect("list destination directory")
-                          .all(|entry| !entry
-                              .expect("directory entry")
-                              .file_name()
-                              .to_string_lossy()
-                              .starts_with(TEMP_FILE_PREFIX))
-                  );
-              }
-
-              #[test]
-              fn prepublication_faults_preserve_destination_and_clean_temporary_files() {
-                  let root = TempTree::new("fault-before-publish");
-                  let parent = create_project_parent(root.path());
-                  let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
-                  let existing = project_record("example/existing");
-                  store.write_atomic(&existing).expect("write existing state");
-                  let replacement = project_record("example/replacement");
-
-                  for stage in [
-                      PublicationStage::BeforeWrite,
-                      PublicationStage::BeforeFileSync,
-                      PublicationStage::BeforeRename,
-                  ] {
-                      let error = store
-                          .write_atomic_with_hooks(&replacement, &mut FailAt(stage))
-                          .expect_err("injected prepublication failure");
-                      assert_eq!(error.kind(), StateStoreErrorKind::Io);
-                      assert_eq!(
-                          store.read(existing.path()).expect("read preserved state"),
-                          StateRead::Present(existing.bytes().to_vec())
-                      );
-                      assert_no_temporary_files(&parent);
-                  }
-              }
-
-              #[test]
-              fn parent_sync_fault_reports_error_after_publication() {
-                  let root = TempTree::new("fault-parent-sync");
-                  let parent = create_project_parent(root.path());
-                  let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
-                  let existing = project_record("example/existing");
-                  store.write_atomic(&existing).expect("write existing state");
-                  let replacement = project_record("example/replacement");
-
-                  let error = store
-                      .write_atomic_with_hooks(
-                          &replacement,
-                          &mut FailAt(PublicationStage::BeforeParentSync),
-                      )
-                      .expect_err("injected parent-sync failure");
-                  assert_eq!(error.kind(), StateStoreErrorKind::Io);
-                  assert_eq!(
-                      store.read(replacement.path()).expect("read published state"),
-                      StateRead::Present(replacement.bytes().to_vec())
-                  );
-                  assert_no_temporary_files(&parent);
-              }
-          }
-          '''
-          if text.count(final) != 1:
-              raise SystemExit('final test anchor did not match exactly once')
-          text = text.replace(final, expanded)
-
-          path.write_text(text, encoding='utf-8')
+        let error = store
+            .write_atomic_with_hooks(
+                &replacement,
+                &mut FailAt(PublicationStage::BeforeParentSync),
+            )
+            .expect_err("injected parent-sync failure");
+        assert_eq!(error.kind(), StateStoreErrorKind::Io);
+        assert_eq!(
+            store.read(replacement.path()).expect("read published state"),
+            StateRead::Present(replacement.bytes().to_vec())
+        );
+        assert_no_temporary_files(&parent);
+    }
+'''
+          if not text.endswith("}\n"):
+              raise SystemExit("test module closing brace was not found")
+          text = text[:-2] + test_block + "}\n"
+          path.write_text(text, encoding="utf-8")
           PY
 
           cargo fmt --all
           rm -f \
             .github/workflows/add-linux-state-fault-tests.yml \
-            .tmp/add-linux-state-fault-tests
+            .tmp/add-linux-state-fault-tests \
+            .tmp/add-linux-state-fault-tests-2 \
+            .tmp/add-linux-state-fault-tests-3
           rmdir .tmp 2>/dev/null || true
           git diff --check
 
