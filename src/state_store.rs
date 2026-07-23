@@ -5,9 +5,7 @@ use serde::Serialize;
 use crate::journal_document::{
     JournalDocumentError, JournalStateDocument, encode_journal_document,
 };
-use crate::state::{
-    InstallationId, JournalId, ResourceRecordId, StateLayout, StatePath,
-};
+use crate::state::{InstallationId, ResourceRecordId, StateLayout, StatePath};
 use crate::state_document::{
     ProjectStateDocument, ResourceStateDocument, StateDocument, StateDocumentError,
     encode_state_document,
@@ -236,7 +234,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::journal::{
-        JOURNAL_SCHEMA_VERSION, ActionOutcome, ExecutionJournal, ExecutionLane, JournalRecord,
+        ActionOutcome, ExecutionJournal, ExecutionLane, JOURNAL_SCHEMA_VERSION, JournalRecord,
         PlannedMutation, Preconditions, RollbackClass,
     };
     use crate::journal_document::JournalStateDocument;
@@ -247,8 +245,8 @@ mod tests {
     use crate::state_document::{ProjectStateDocument, ResourceStateDocument};
 
     use super::{
-        StateRead, StateRecord, StateRecordKind, StateStore, StateStoreError, StateWriteDisposition,
-        StateWriteReceipt,
+        StateRead, StateRecord, StateRecordKind, StateStore, StateStoreError,
+        StateWriteDisposition, StateWriteReceipt,
     };
 
     #[derive(Default)]
@@ -287,10 +285,7 @@ mod tests {
             } else {
                 StateWriteDisposition::Created
             };
-            Ok(StateWriteReceipt::new(
-                disposition,
-                record.bytes().len(),
-            ))
+            Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
         }
     }
 
