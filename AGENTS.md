@@ -9,11 +9,11 @@ Do not turn SmolRunner into a new pipeline language, runner protocol, deployment
 ## Current priorities
 
 1. Preserve the threat-model invariants in `docs/THREAT_MODEL.md`.
-2. Follow the privilege, adoption, rollback, and ownership decisions in `docs/adr/`.
+2. Follow the privilege, adoption, rollback, ownership, and canonical-evidence decisions in `docs/adr/`.
 3. Build a dependable CLI and structured state model before adding a daemon, TUI, or web dashboard.
 4. Prefer idempotent plans and explicit reconciliation over one-shot shell setup.
 5. Keep project-specific build and test behavior inside each enrolled repository.
-6. Unknown manifest and ownership-marker fields or versions must fail closed.
+6. Unknown manifest, ownership-marker, and fingerprint fields or versions must fail closed.
 7. Distinguish proven absence from unknown state; never mutate based on an unproven assumption.
 
 ## Required checks
@@ -45,10 +45,12 @@ A doctor warning is acceptable on a development machine that lacks Podman or sys
 - Rollback and compensation run in reverse completion order; do not describe compensation as restoration.
 - Public journals may contain only public receipts and public failures.
 - Names, labels, mutable tags, and path basenames never prove ownership.
+- Production planning and probing must use kind-specific canonical resource constructors; do not build free-form locators or fingerprints.
+- Desired identities require their kind's minimum immutable evidence. Observations may omit evidence only so classification can report `unknown`; present evidence must validate canonically.
 - An unmarked exact-evidence match is adoptable only after explicit confirmation; it is never automatically managed.
 - Foreign, conflicting, and unknown resources are protected from mutation.
-- Do not write state or markers until atomic persistence, permissions, symlink defense, locking, crash recovery, migrations, canonical resource evidence, and installation-ID generation are concretely designed.
-- Do not add an apply path until durable ownership persistence, root elevation, runner-user execution, journal persistence, GitHub credential acquisition, and package-operation rollback classes are concretely designed.
+- Do not write state or markers until atomic persistence, permissions, symlink defense, locking, crash recovery, migrations, and installation-ID generation are concretely implemented.
+- Do not add an apply path until durable ownership persistence, root elevation, runner-user execution, journal persistence, GitHub credential acquisition, and package-operation rollback classes are concretely implemented.
 - Generated subprocesses must use explicit absolute program paths and argument vectors; do not introduce `sh -c` or equivalent implicit shells.
 - Child-process environments must start empty and receive only explicit allowlisted values.
 - Treat output redaction as defense in depth, not proof that a child process cannot transform or leak a secret.
