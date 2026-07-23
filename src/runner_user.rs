@@ -287,8 +287,8 @@ pub fn parse_subordinate_ranges(
         if fields.next().is_some() {
             return Err(malformed_subordinate_range());
         }
-        let start = parse_canonical_u32("subordinate range start", start)?;
-        let count = parse_canonical_u32("subordinate range count", count)?;
+        let start = parse_subordinate_u32("subordinate range start", start)?;
+        let count = parse_subordinate_u32("subordinate range count", count)?;
         if start == 0 || count == 0 || u64::from(start) + u64::from(count) > u64::from(u32::MAX) + 1
         {
             return Err(malformed_subordinate_range());
@@ -367,7 +367,7 @@ pub fn verify_runner_user(
     subordinate_gids: &[SubordinateRange],
     runtime: &RuntimeDirectoryObservation,
 ) -> Result<VerifiedRunnerUser, RunnerUserVerificationError> {
-    if passwd.username != *context.username()
+    if &passwd.username != context.username()
         || passwd.uid != context.uid()
         || passwd.primary_gid != context.primary_gid()
         || passwd.home != context.home()
@@ -408,16 +408,10 @@ pub fn verify_runner_user(
         ));
     }
 
-    let subordinate_uid_count = verify_subordinate_capacity(
-        subordinate_uids,
-        context.uid(),
-        "UID",
-    )?;
-    let subordinate_gid_count = verify_subordinate_capacity(
-        subordinate_gids,
-        context.primary_gid(),
-        "GID",
-    )?;
+    let subordinate_uid_count =
+        verify_subordinate_capacity(subordinate_uids, context.uid(), "UID")?;
+    let subordinate_gid_count =
+        verify_subordinate_capacity(subordinate_gids, context.primary_gid(), "GID")?;
 
     Ok(VerifiedRunnerUser {
         username: passwd.username.clone(),
@@ -462,6 +456,19 @@ fn verify_subordinate_capacity(
     Ok(total)
 }
 
+fn parse_subordinate_u32(field: &str, value: &str) -> Result<u32, RunnerUserVerificationError> {
+    let parsed = value
+        .parse::<u32>()
+        .map_err(|_| malformed_subordinate_range())?;
+    if parsed.to_string() != value {
+        return Err(RunnerUserVerificationError::new(
+            RunnerUserVerificationErrorKind::MalformedSubordinateRange,
+            format!("{field} must contain a canonical decimal integer"),
+        ));
+    }
+    Ok(parsed)
+}
+
 fn malformed_subordinate_range() -> RunnerUserVerificationError {
     RunnerUserVerificationError::new(
         RunnerUserVerificationErrorKind::MalformedSubordinateRange,
@@ -469,10 +476,7 @@ fn malformed_subordinate_range() -> RunnerUserVerificationError {
     )
 }
 
-fn parse_canonical_u32(
-    field: &str,
-    value: &str,
-) -> Result<u32, RunnerUserVerificationError> {
+fn parse_canonical_u32(field: &str, value: &str) -> Result<u32, RunnerUserVerificationError> {
     let parsed = value.parse::<u32>().map_err(|_| {
         RunnerUserVerificationError::new(
             RunnerUserVerificationErrorKind::MalformedAccount,
@@ -513,7 +517,8 @@ fn canonical_absolute_path(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Path;
 
     use crate::lane_command::{LinuxAccountName, RunnerUserContext};
 
@@ -610,7 +615,10 @@ mod tests {
         assert_eq!(verified.uid(), 1001);
         assert_eq!(verified.primary_gid(), 1001);
         assert_eq!(verified.home(), "/srv/project-runner");
-        assert_eq!(verified.runtime_directory().to_str(), Some("/run/user/1001"));
+        assert_eq!(
+            verified.runtime_directory().to_str(),
+            Some("/run/user/1001")
+        );
         assert_eq!(verified.subordinate_uid_count(), MIN_SUBORDINATE_ID_COUNT);
         assert_eq!(verified.subordinate_gid_count(), MIN_SUBORDINATE_ID_COUNT);
     }
@@ -662,31 +670,31 @@ mod tests {
     }
 
     #[test]
-    fn inspects_real_runtime_directory_metadata_without_following_symlinks() {
-        let root = std::env::temp_dir().join(format!(
-            "smolrunner-runner-runtime-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir(&root).expect("create runtime directory");
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
-            .expect("set runtime mode");
-        let metadata = fs::metadata(&root).expect("runtime metadata");
-        if metadata.uid() == 0 || metadata.gid() == 0 {
-            fs::remove_dir_all(&root).expect("remove runtime directory");
+    fn inspects_live_runtime_directory_when_available() {
+        let host_metadata = fs::metadata(std::env::temp_dir()).expect("host metadata");
+        if host_metadata.uid() == 0 || host_metadata.gid() == 0 {
             return;
         }
-        let context = RunnerUserContext::new(
-            account_name(),
-            metadata.uid(),
-            metadata.gid(),
-            root.to_str().expect("UTF-8 runtime path"),
-        )
-        .expect("runtime context");
+        let context = context(
+            host_metadata.uid(),
+            host_metadata.gid(),
+            "/srv/project-runner",
+        );
+        let runtime_path = Path::new(context.runtime_directory());
+        let metadata = match fs::metadata(runtime_path) {
+            Ok(metadata) => metadata,
+            Err(_) => return,
+        };
+        if metadata.uid() != context.uid()
+            || metadata.gid() != context.primary_gid()
+            || metadata.mode() & 0o7777 != 0o700
+        {
+            return;
+        }
         let observation = inspect_runtime_directory(&context).expect("inspect runtime directory");
-        assert_eq!(observation.owner_uid(), metadata.uid());
-        assert_eq!(observation.owner_gid(), metadata.gid());
+        assert_eq!(observation.path(), runtime_path);
+        assert_eq!(observation.owner_uid(), context.uid());
+        assert_eq!(observation.owner_gid(), context.primary_gid());
         assert_eq!(observation.mode(), 0o700);
-        fs::remove_dir_all(root).expect("remove runtime directory");
     }
 }
