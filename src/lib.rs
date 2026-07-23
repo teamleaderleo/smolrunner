@@ -7,6 +7,7 @@ pub mod plan;
 pub mod process;
 pub mod resource;
 pub mod state;
+pub mod state_document;
 
 use serde::Serialize;
 
