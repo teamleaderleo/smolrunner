@@ -107,9 +107,9 @@ impl RunnerUserContext {
         primary_gid: u32,
         home: &str,
     ) -> Result<Self, LaneCommandError> {
-        if uid == 0 {
+        if uid == 0 || primary_gid == 0 {
             return Err(LaneCommandError::single(
-                "runner-user UID must be greater than zero",
+                "runner-user UID and primary GID must be greater than zero",
             ));
         }
         let home = canonical_absolute_path("runner-user home", home)?;
@@ -206,11 +206,7 @@ impl LaneCommand {
         let spec = CommandSpec::new(GROUPADD)
             .argument("--system")
             .argument(group.as_str());
-        Ok(Self::new(
-            action,
-            LaneCommandKind::EnsureSystemGroup,
-            spec,
-        ))
+        Ok(Self::new(action, LaneCommandKind::EnsureSystemGroup, spec))
     }
 
     /// Build the reviewed system-user creation command.
@@ -237,11 +233,7 @@ impl LaneCommand {
             .argument(NOLOGIN)
             .argument("--no-create-home")
             .argument(user.as_str());
-        Ok(Self::new(
-            action,
-            LaneCommandKind::EnsureSystemUser,
-            spec,
-        ))
+        Ok(Self::new(action, LaneCommandKind::EnsureSystemUser, spec))
     }
 
     /// Build the reviewed linger-enablement command.
@@ -271,11 +263,7 @@ impl LaneCommand {
     ) -> Result<Self, LaneCommandError> {
         require_lane(action, ExecutionLane::RunnerUser)?;
         let spec = runner_user_spec(runner, PODMAN, &["info", "--format", "json"]);
-        Ok(Self::new(
-            action,
-            LaneCommandKind::RunnerPodmanInfo,
-            spec,
-        ))
+        Ok(Self::new(action, LaneCommandKind::RunnerPodmanInfo, spec))
     }
 
     /// Build a runner-user `git --version` command behind the reviewed `runuser` boundary.
@@ -289,11 +277,7 @@ impl LaneCommand {
     ) -> Result<Self, LaneCommandError> {
         require_lane(action, ExecutionLane::RunnerUser)?;
         let spec = runner_user_spec(runner, GIT, &["--version"]);
-        Ok(Self::new(
-            action,
-            LaneCommandKind::RunnerGitVersion,
-            spec,
-        ))
+        Ok(Self::new(action, LaneCommandKind::RunnerGitVersion, spec))
     }
 
     #[must_use]
@@ -351,7 +335,11 @@ impl fmt::Display for LaneCommandError {
 
 impl std::error::Error for LaneCommandError {}
 
-fn runner_user_spec(runner: &RunnerUserContext, inner_program: &str, arguments: &[&str]) -> CommandSpec {
+fn runner_user_spec(
+    runner: &RunnerUserContext,
+    inner_program: &str,
+    arguments: &[&str],
+) -> CommandSpec {
     let mut spec = CommandSpec::new(RUNUSER)
         .argument("--user")
         .argument(runner.username.as_str())
@@ -367,10 +355,7 @@ fn runner_user_spec(runner: &RunnerUserContext, inner_program: &str, arguments: 
     spec
 }
 
-fn require_lane(
-    action: &PlannedMutation,
-    expected: ExecutionLane,
-) -> Result<(), LaneCommandError> {
+fn require_lane(action: &PlannedMutation, expected: ExecutionLane) -> Result<(), LaneCommandError> {
     if action.lane == expected {
         Ok(())
     } else {
@@ -407,9 +392,10 @@ fn canonical_absolute_path(field: &str, value: &str) -> Result<String, LaneComma
 #[cfg(test)]
 mod tests {
     use crate::journal::{ExecutionLane, PlannedMutation, Preconditions, RollbackClass};
+    use crate::process::CommandValue;
 
     use super::{
-        APT_GET, GIT, GROUPADD, LaneCommand, LaneCommandKind, LinuxAccountName, LOGINCTL, NOLOGIN,
+        APT_GET, GIT, GROUPADD, LOGINCTL, LaneCommand, LaneCommandKind, LinuxAccountName, NOLOGIN,
         PODMAN, PackageName, RUNUSER, RunnerUserContext, USERADD,
     };
 
@@ -466,15 +452,10 @@ mod tests {
             [GROUPADD, "--system", "project-runner"]
         );
         assert_eq!(
-            LaneCommand::ensure_system_user(
-                &root,
-                &user,
-                &group,
-                "/var/lib/project-runner",
-            )
-            .expect("user command")
-            .spec()
-            .displayed_argv(),
+            LaneCommand::ensure_system_user(&root, &user, &group, "/var/lib/project-runner",)
+                .expect("user command")
+                .spec()
+                .displayed_argv(),
             [
                 USERADD,
                 "--system",
@@ -522,7 +503,11 @@ mod tests {
             [RUNUSER, "--user", "project-runner", "--", GIT, "--version"]
         );
         assert_eq!(
-            git.spec().environment.keys().map(String::as_str).collect::<Vec<_>>(),
+            git.spec()
+                .environment
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
             ["HOME", "LOGNAME", "USER", "XDG_RUNTIME_DIR"]
         );
         assert_eq!(
@@ -550,8 +535,10 @@ mod tests {
         PackageName::parse("--option").expect_err("option-shaped package must fail");
         PackageName::parse("Podman").expect_err("uppercase package must fail");
         LinuxAccountName::parse("root/user").expect_err("unsafe account must fail");
-        RunnerUserContext::new(account("project-runner"), 0, 0, "/srv/runner")
+        RunnerUserContext::new(account("project-runner"), 0, 1001, "/srv/runner")
             .expect_err("root runner user must fail");
+        RunnerUserContext::new(account("project-runner"), 1001, 0, "/srv/runner")
+            .expect_err("root primary group must fail");
         RunnerUserContext::new(account("project-runner"), 1001, 1001, "/srv/../root")
             .expect_err("aliased home must fail");
     }
