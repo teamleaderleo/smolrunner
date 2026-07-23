@@ -1,0 +1,75 @@
+name: Add required lane programs
+
+on:
+  push:
+    branches: [feature/lane-executable-verification]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/lane-executable-verification
+          fetch-depth: 1
+
+      - name: Add sealed program enumeration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/lane_command.rs')
+          text = path.read_text(encoding='utf-8')
+          anchor = '''    #[must_use]
+              pub fn spec(&self) -> &CommandSpec {
+                  &self.spec
+              }
+
+          '''
+          replacement = '''    #[must_use]
+              pub fn spec(&self) -> &CommandSpec {
+                  &self.spec
+              }
+
+              #[must_use]
+              pub fn required_programs(&self) -> Vec<&Path> {
+                  let outer = self.spec.program.as_path();
+                  match self.kind {
+                      LaneCommandKind::RunnerPodmanInfo => vec![outer, Path::new(PODMAN)],
+                      LaneCommandKind::RunnerGitVersion => vec![outer, Path::new(GIT)],
+                      LaneCommandKind::AptInstall
+                      | LaneCommandKind::EnsureSystemGroup
+                      | LaneCommandKind::EnsureSystemUser
+                      | LaneCommandKind::EnableLinger => vec![outer],
+                  }
+              }
+
+          '''
+          if text.count(anchor) != 1:
+              raise SystemExit('spec method anchor did not match exactly once')
+          path.write_text(text.replace(anchor, replacement), encoding='utf-8')
+          PY
+          cargo fmt --all
+          rm -f \
+            .github/workflows/add-required-lane-programs.yml \
+            .tmp/add-required-lane-programs
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit sealed program enumeration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: expose sealed lane program requirements'
+          git push origin HEAD:feature/lane-executable-verification
