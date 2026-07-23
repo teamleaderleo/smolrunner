@@ -1,0 +1,49 @@
+name: Fix fault-test helper marker
+
+on:
+  push:
+    branches: [feature/linux-state-fault-tests]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/linux-state-fault-tests
+          fetch-depth: 1
+
+      - name: Correct helper boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/add-linux-state-fault-tests.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '              "fn write_and_sync(\\n",\n'
+          new = '              "fn write_and_sync",\n'
+          if text.count(old) != 1:
+              raise SystemExit('write_and_sync workflow marker did not match exactly once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          rm -f \
+            .github/workflows/fix-fault-test-helper.yml \
+            .tmp/fix-fault-test-helper
+          rmdir .tmp 2>/dev/null || true
+
+      - name: Commit helper correction
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'ci: correct fault-test helper boundary'
+          git push origin HEAD:feature/linux-state-fault-tests
