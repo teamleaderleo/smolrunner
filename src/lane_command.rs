@@ -100,7 +100,7 @@ impl RunnerUserContext {
     ///
     /// # Errors
     ///
-    /// Returns an error for UID zero, unsafe names, or noncanonical absolute home paths.
+    /// Returns an error for UID or primary GID zero, unsafe names, or noncanonical absolute home paths.
     pub fn new(
         username: LinuxAccountName,
         uid: u32,
@@ -392,7 +392,6 @@ fn canonical_absolute_path(field: &str, value: &str) -> Result<String, LaneComma
 #[cfg(test)]
 mod tests {
     use crate::journal::{ExecutionLane, PlannedMutation, Preconditions, RollbackClass};
-    use crate::process::CommandValue;
     use crate::process::CommandValue;
 
     use super::{
