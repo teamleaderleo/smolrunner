@@ -1,5 +1,7 @@
 pub mod doctor;
 pub mod host;
+#[cfg(target_os = "linux")]
+pub mod installation_id;
 pub mod journal;
 pub mod journal_document;
 #[cfg(target_os = "linux")]
