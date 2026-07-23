@@ -1,0 +1,60 @@
+name: Fix state store API
+
+on:
+  push:
+    branches: [feature/state-store-contract]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/state-store-contract
+          fetch-depth: 1
+
+      - name: Expose implementation constructors
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/state_store.rs')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              '    pub(crate) const fn new(disposition: StateWriteDisposition, bytes_written: usize) -> Self {':
+              '    pub const fn new(disposition: StateWriteDisposition, bytes_written: usize) -> Self {',
+              '    pub(crate) fn public(kind: StateStoreErrorKind, message: impl Into<String>) -> Self {':
+              '    pub fn public(kind: StateStoreErrorKind, message: impl Into<String>) -> Self {',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected exact API expression once: {old}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+          cargo fmt --all
+          rm -f \
+            .github/workflows/fix-state-store-api.yml \
+            .state-store-clippy.txt \
+            .tmp/capture-state-store-clippy \
+            .tmp/fix-state-store-api
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit bounded correction
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: expose state store implementation constructors'
+          git push origin HEAD:feature/state-store-contract
