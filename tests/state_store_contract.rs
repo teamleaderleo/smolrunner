@@ -14,10 +14,7 @@ impl StateStore for ExternalStore {
         ))
     }
 
-    fn write_atomic(
-        &mut self,
-        record: &StateRecord,
-    ) -> Result<StateWriteReceipt, StateStoreError> {
+    fn write_atomic(&mut self, record: &StateRecord) -> Result<StateWriteReceipt, StateStoreError> {
         Ok(StateWriteReceipt::new(
             StateWriteDisposition::Created,
             record.bytes().len(),
@@ -27,8 +24,7 @@ impl StateStore for ExternalStore {
 
 #[test]
 fn external_store_implementations_can_return_bounded_public_results() {
-    let installation_id =
-        InstallationId::parse("0123456789abcdef").expect("valid installation ID");
+    let installation_id = InstallationId::parse("0123456789abcdef").expect("valid installation ID");
     let path = StateLayout::installation(&installation_id);
     let store = ExternalStore;
     let error = store
