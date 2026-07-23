@@ -4,44 +4,46 @@ SmolRunner should remain useful while it is still small. The roadmap favors a de
 
 ## Milestone 0 — foundation
 
-- Rust CLI with human and JSON output.
-- Host `doctor` checks for Linux, systemd, cgroup v2, Podman, and required commands.
-- Threat model and non-goals.
-- Continuous formatting, linting, and test verification.
+- [x] Rust CLI with human and JSON output.
+- [x] Host `doctor` checks for Linux, systemd, cgroup v2, Podman, and required commands.
+- [x] Threat model and non-goals.
+- [x] Continuous formatting, linting, and test verification.
 
 ## Milestone 1 — desired state
 
-- Versioned `smolrunner.yml` manifest.
-- Typed host, runner, project, and resource-limit models.
-- `smolrunner plan` that makes no changes.
-- Idempotent command execution with structured events.
-- Debian and Ubuntu host preparation.
-- Explicit rollback records for every host mutation.
+- [x] Versioned `smolrunner.yml` manifest.
+- [x] Typed host, runner, project, and resource-limit models.
+- [x] `smolrunner plan` that makes no changes.
+- [x] Typed current-host observations with present, absent, and unknown state.
+- [x] Shell-free command execution records with an empty child environment and explicit secret redaction.
+- [ ] Debian and Ubuntu host preparation.
+- [ ] Explicit rollback records for every host mutation.
+- [ ] Root-versus-runner-user privilege separation and adoption of existing installations.
 
 ## Milestone 2 — runner lifecycle
 
-- Install a checksum-verified official GitHub Actions runner.
-- Repository and organization registration scopes.
-- Dedicated Linux user and systemd service management.
-- Runner status, version inspection, update, disable, and removal.
-- Short-lived registration-token handling without persistent plaintext storage.
+- [ ] Install a checksum-verified official GitHub Actions runner.
+- [ ] Repository and organization registration scopes.
+- [ ] Dedicated Linux user and systemd service management.
+- [ ] Runner status, version inspection, update, disable, and removal.
+- [ ] Short-lived registration-token handling without persistent plaintext storage.
 
 ## Milestone 3 — project execution
 
-- Project-owned Containerfile and verification command.
-- Rootless Podman image build and digest recording.
-- Immutable committed-source archives.
-- Separate network policy for dependency installation and verification.
-- Capability dropping, no-new-privileges, and resource limits.
-- Focused and full suite conventions without inventing a pipeline language.
+- [ ] Project-owned Containerfile and verification command.
+- [ ] Rootless Podman image build and digest recording.
+- [ ] Immutable committed-source archives.
+- [ ] Separate network policy for dependency installation and verification.
+- [ ] Capability dropping, no-new-privileges, and resource limits.
+- [ ] Focused and full suite conventions without inventing a pipeline language.
 
 ## Milestone 4 — small-fleet operations
 
-- Multi-host inventory over SSH.
-- Fleet-wide `doctor`, status, and upgrade planning.
-- Disk-pressure and stale-image diagnostics.
-- Machine-readable remediation suggestions.
-- Optional terminal UI backed by the same core library.
+- [ ] Multi-host inventory over SSH.
+- [ ] Fleet-wide `doctor`, status, and upgrade planning.
+- [ ] Disk-pressure and stale-image diagnostics.
+- [ ] Machine-readable remediation suggestions.
+- [ ] Optional terminal UI backed by the same core library.
 
 ## Later, only with evidence
 
