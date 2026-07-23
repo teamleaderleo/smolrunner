@@ -43,11 +43,7 @@ impl ExecutableVerificationError {
         &self.public_message
     }
 
-    fn new(
-        kind: ExecutableVerificationErrorKind,
-        path: &Path,
-        message: impl Into<String>,
-    ) -> Self {
+    fn new(kind: ExecutableVerificationErrorKind, path: &Path, message: impl Into<String>) -> Self {
         Self {
             kind,
             path: path.to_path_buf(),
@@ -138,12 +134,7 @@ pub fn verify_executable(path: &Path) -> Result<VerifiedExecutable, ExecutableVe
     } else {
         ObservedObjectKind::Other
     };
-    verify_observation(
-        path,
-        object_kind,
-        metadata.uid(),
-        metadata.mode() & 0o7777,
-    )
+    verify_observation(path, object_kind, metadata.uid(), metadata.mode() & 0o7777)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,7 +162,10 @@ fn verify_observation(
             return Err(ExecutableVerificationError::new(
                 ExecutableVerificationErrorKind::NonRegularFile,
                 path,
-                format!("reviewed executable is not a regular file: {}", path.display()),
+                format!(
+                    "reviewed executable is not a regular file: {}",
+                    path.display()
+                ),
             ));
         }
         ObservedObjectKind::RegularFile => {}
@@ -180,7 +174,10 @@ fn verify_observation(
         return Err(ExecutableVerificationError::new(
             ExecutableVerificationErrorKind::WrongOwner,
             path,
-            format!("reviewed executable is not owned by root: {}", path.display()),
+            format!(
+                "reviewed executable is not owned by root: {}",
+                path.display()
+            ),
         ));
     }
     if mode & 0o022 != 0 {
