@@ -244,9 +244,9 @@ fn validate_labels(labels: &[String], problems: &mut Vec<ManifestProblem>) {
     for label in labels {
         let valid = !label.is_empty()
             && label.len() <= 63
-            && label.bytes().all(|byte| {
-                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')
-            });
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
         if !valid {
             problems.push(ManifestProblem::new(
                 "runner.labels",
@@ -274,9 +274,9 @@ fn validate_image(image: &str, problems: &mut Vec<ManifestProblem>) {
 fn validate_relative_path(field: &str, path: &Path, problems: &mut Vec<ManifestProblem>) {
     let valid = !path.as_os_str().is_empty()
         && !path.is_absolute()
-        && path.components().all(|component| {
-            matches!(component, Component::Normal(_) | Component::CurDir)
-        });
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir));
 
     if !valid {
         problems.push(ManifestProblem::new(
@@ -347,7 +347,7 @@ fn valid_memory(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ManifestErrorKind, MANIFEST_VERSION, parse};
+    use super::{MANIFEST_VERSION, ManifestErrorKind, parse};
 
     const VALID: &str = r#"
 version: 1
@@ -385,7 +385,12 @@ trust:
         let error = parse(&VALID.replace("version: 1", "version: 2"))
             .expect_err("future versions must fail closed");
         assert_eq!(error.kind, ManifestErrorKind::Validation);
-        assert!(error.problems.iter().any(|problem| problem.field == "version"));
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.field == "version")
+        );
     }
 
     #[test]
@@ -410,8 +415,11 @@ trust:
 
     #[test]
     fn rejects_unknown_fields() {
-        let error = parse(&VALID.replace("repository: example/project", "repository: example/project\nsurprise: true"))
-            .expect_err("unknown fields must fail closed");
+        let error = parse(&VALID.replace(
+            "repository: example/project",
+            "repository: example/project\nsurprise: true",
+        ))
+        .expect_err("unknown fields must fail closed");
         assert_eq!(error.kind, ManifestErrorKind::Parse);
     }
 }
