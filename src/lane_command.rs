@@ -4,7 +4,7 @@ use std::path::{Component, Path};
 use serde::Serialize;
 
 use crate::journal::{ExecutionLane, PlannedMutation};
-use crate::process::{CommandSpec, CommandValue};
+use crate::process::CommandSpec;
 
 const APT_GET: &str = "/usr/bin/apt-get";
 const GROUPADD: &str = "/usr/sbin/groupadd";
