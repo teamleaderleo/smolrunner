@@ -302,9 +302,7 @@ fn is_canonical_temp_name(name: &[u8]) -> bool {
 
 fn public_name(name: &[u8]) -> String {
     if name.iter().all(|byte| {
-        byte.is_ascii_lowercase()
-            || byte.is_ascii_digit()
-            || matches!(byte, b'.' | b'_' | b'-')
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
     }) {
         String::from_utf8(name.to_vec()).expect("safe ASCII is valid UTF-8")
     } else {
@@ -320,9 +318,8 @@ fn public_name(name: &[u8]) -> String {
 }
 
 fn open_directory_path(path: &Path, subject: &str) -> Result<OwnedFd, StateStoreError> {
-    let directory = fs::open(path, DIRECTORY_FLAGS, Mode::empty()).map_err(|error| {
-        map_directory_open_error(error, subject)
-    })?;
+    let directory = fs::open(path, DIRECTORY_FLAGS, Mode::empty())
+        .map_err(|error| map_directory_open_error(error, subject))?;
     inspect_directory(&directory, subject)?;
     Ok(directory)
 }
@@ -332,9 +329,8 @@ fn open_directory_at(
     name: &str,
     subject: &str,
 ) -> Result<OwnedFd, StateStoreError> {
-    let directory = fs::openat(parent, name, DIRECTORY_FLAGS, Mode::empty()).map_err(|error| {
-        map_directory_open_error(error, subject)
-    })?;
+    let directory = fs::openat(parent, name, DIRECTORY_FLAGS, Mode::empty())
+        .map_err(|error| map_directory_open_error(error, subject))?;
     inspect_directory(&directory, subject)?;
     Ok(directory)
 }
@@ -386,14 +382,10 @@ fn map_directory_open_error(error: Errno, subject: &str) -> StateStoreError {
             StateStoreErrorKind::UnsafeFilesystem,
             format!("{subject} is symlinked or not a directory"),
         ),
-        Errno::NOENT => StateStoreError::public(
-            StateStoreErrorKind::Io,
-            format!("{subject} does not exist"),
-        ),
-        _ => StateStoreError::public(
-            StateStoreErrorKind::Io,
-            format!("could not open {subject}"),
-        ),
+        Errno::NOENT => {
+            StateStoreError::public(StateStoreErrorKind::Io, format!("{subject} does not exist"))
+        }
+        _ => StateStoreError::public(StateStoreErrorKind::Io, format!("could not open {subject}")),
     }
 }
 
@@ -418,9 +410,7 @@ mod tests {
     use crate::state::InstallationId;
     use crate::state_store::MAX_STATE_DOCUMENT_BYTES;
 
-    use super::{
-        RecoveryArea, RecoveryConcern, RecoveryDisposition, inspect_orphans,
-    };
+    use super::{RecoveryArea, RecoveryConcern, RecoveryDisposition, inspect_orphans};
 
     static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
     const VALID_NAME: &str = ".smolrunner-tmp-0123456789abcdef0123456789abcdef";
@@ -437,8 +427,7 @@ mod tests {
                 std::process::id()
             ));
             fs::create_dir(&path).expect("create temporary root");
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o750))
-                .expect("set root mode");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o750)).expect("set root mode");
             prepare_installation(&path, &installation_id()).expect("prepare installation");
             Self { path }
         }
@@ -466,8 +455,7 @@ mod tests {
 
     fn private_write(path: &Path, bytes: &[u8]) {
         fs::write(path, bytes).expect("write candidate");
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .expect("set private mode");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).expect("set private mode");
     }
 
     #[test]
@@ -480,7 +468,10 @@ mod tests {
         assert_eq!(report.findings().len(), 1);
         let finding = &report.findings()[0];
         assert_eq!(finding.area(), RecoveryArea::Project);
-        assert_eq!(finding.disposition(), RecoveryDisposition::RecoverableOrphan);
+        assert_eq!(
+            finding.disposition(),
+            RecoveryDisposition::RecoverableOrphan
+        );
         assert!(finding.concerns().is_empty());
         assert_eq!(finding.size_bytes(), Some(13));
     }
@@ -492,8 +483,7 @@ mod tests {
         private_write(&resources.join(".smolrunner-tmp-short"), b"short");
         let broad = resources.join(VALID_NAME);
         fs::write(&broad, b"broad").expect("write broad candidate");
-        fs::set_permissions(&broad, fs::Permissions::from_mode(0o644))
-            .expect("set broad mode");
+        fs::set_permissions(&broad, fs::Permissions::from_mode(0o644)).expect("set broad mode");
 
         let journals = root.installation().join("journals");
         let outside = root.path().join("outside");
@@ -506,23 +496,35 @@ mod tests {
 
         let report = inspect_orphans(root.path(), &installation_id()).expect("inspect orphans");
         assert_eq!(report.findings().len(), 4);
-        assert!(report.findings().iter().all(|finding| {
-            finding.disposition() == RecoveryDisposition::Suspicious
-        }));
+        assert!(
+            report
+                .findings()
+                .iter()
+                .all(|finding| { finding.disposition() == RecoveryDisposition::Suspicious })
+        );
         assert!(report.findings().iter().any(|finding| {
             finding
                 .concerns()
                 .contains(&RecoveryConcern::MalformedTemporaryName)
         }));
-        assert!(report.findings().iter().any(|finding| {
-            finding.concerns().contains(&RecoveryConcern::WrongMode)
-        }));
-        assert!(report.findings().iter().any(|finding| {
-            finding.concerns().contains(&RecoveryConcern::Symlink)
-        }));
-        assert!(report.findings().iter().any(|finding| {
-            finding.concerns().contains(&RecoveryConcern::Oversized)
-        }));
+        assert!(
+            report
+                .findings()
+                .iter()
+                .any(|finding| { finding.concerns().contains(&RecoveryConcern::WrongMode) })
+        );
+        assert!(
+            report
+                .findings()
+                .iter()
+                .any(|finding| { finding.concerns().contains(&RecoveryConcern::Symlink) })
+        );
+        assert!(
+            report
+                .findings()
+                .iter()
+                .any(|finding| { finding.concerns().contains(&RecoveryConcern::Oversized) })
+        );
     }
 
     #[test]
@@ -536,8 +538,10 @@ mod tests {
         let report = inspect_orphans(root.path(), &installation_id()).expect("inspect orphans");
         assert_eq!(report.findings().len(), 1);
         assert!(report.findings()[0].name().starts_with("hex:"));
-        assert!(report.findings()[0]
-            .concerns()
-            .contains(&RecoveryConcern::MalformedTemporaryName));
+        assert!(
+            report.findings()[0]
+                .concerns()
+                .contains(&RecoveryConcern::MalformedTemporaryName)
+        );
     }
 }
