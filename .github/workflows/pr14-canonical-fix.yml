@@ -1,8 +1,8 @@
 name: PR 14 canonical fix
 
 on:
-  pull_request_target:
-    types: [synchronize]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
@@ -10,9 +10,10 @@ permissions:
 jobs:
   apply:
     if: >-
-      github.event.pull_request.number == 14 &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'feature/canonical-resource-evidence'
+      github.event.issue.pull_request &&
+      github.event.issue.number == 14 &&
+      github.event.comment.body == '/apply-canonical-fix' &&
+      github.event.comment.author_association == 'OWNER'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
