@@ -1,0 +1,63 @@
+name: Fix PR 14 const requirement helper
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - src/resource.rs
+      - .tmp/pr14-clippy.txt
+      - .github/workflows/fix-pr14-const-requires.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/canonical-resource-evidence'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact head branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - name: Apply the compiler-directed correction and clean diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f src/resource.rs
+          test ! -L src/resource.rs
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/resource.rs")
+          text = path.read_text(encoding="utf-8")
+          old = "    const fn requires(self, present: bool) -> bool {"
+          new = "    fn requires(self, present: bool) -> bool {"
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one const requires helper")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+          cargo fmt --all
+          rm -f \
+            .tmp/pr14-clippy.txt \
+            .github/workflows/fix-pr14-const-requires.yml
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A -- \
+            src/resource.rs \
+            .tmp/pr14-clippy.txt \
+            .github/workflows/fix-pr14-const-requires.yml
+          git commit -m 'fix: make evidence requirement helper non-const'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
