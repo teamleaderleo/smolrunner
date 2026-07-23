@@ -18,8 +18,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           git init --quiet
-          git -c "http.extraheader=AUTHORIZATION: bearer $GH_TOKEN" \
-            fetch --quiet --depth=1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git fetch --quiet --depth=1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$GITHUB_SHA"
           git checkout --quiet FETCH_HEAD
 
       - name: Print formatter changes
