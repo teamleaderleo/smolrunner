@@ -334,7 +334,7 @@ fn random_temporary_name() -> Result<String, StateStoreError> {
             "could not obtain operating-system randomness for a temporary state file",
         )
     })?;
-    if filled.len() != random.len() {
+    if filled != random.len() {
         return Err(StateStoreError::public(
             StateStoreErrorKind::Io,
             "operating-system randomness returned an incomplete temporary-file name",
