@@ -2,6 +2,8 @@ pub mod doctor;
 pub mod host;
 pub mod journal;
 pub mod journal_document;
+#[cfg(target_os = "linux")]
+pub mod linux_state;
 pub mod manifest;
 pub mod ownership;
 pub mod plan;
