@@ -1,0 +1,27 @@
+version: 1
+repository: example/glossless
+
+runner:
+  scope: repository
+  user: glossless-runner
+  labels:
+    - glossless-ci
+
+container:
+  image: localhost/glossless-ci:1
+  file: build/ci/Containerfile
+
+verify:
+  command: scripts/run-vps-verification.sh
+  suites:
+    focused: focused
+    full: full
+
+limits:
+  memory: 2GiB
+  cpus: 1.5
+  pids: 768
+
+trust:
+  forks: deny
+  trigger: operator

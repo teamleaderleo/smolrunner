@@ -1,0 +1,27 @@
+version: 1
+repository: example/quarry
+
+runner:
+  scope: repository
+  user: quarry-runner
+  labels:
+    - quarry-ci
+
+container:
+  image: localhost/quarry-ci:2
+  file: build/ci/Containerfile
+
+verify:
+  command: scripts/run-vps-verification.sh
+  suites:
+    focused: focused
+    full: full
+
+limits:
+  memory: 2GiB
+  cpus: 1.5
+  pids: 768
+
+trust:
+  forks: deny
+  trigger: operator
