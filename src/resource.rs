@@ -606,10 +606,7 @@ fn validate_systemd_identity(
             problems,
         );
         if let Some(external) = external {
-            let expected = format!(
-                "runner-installation:{}",
-                fingerprint.runner_installation_id
-            );
+            let expected = format!("runner-installation:{}", fingerprint.runner_installation_id);
             if external != expected {
                 problems.push(
                     "systemd service external ID must match fingerprint runner installation ID"
@@ -721,9 +718,8 @@ fn validate_github_registration_identity(
             Some(runner_name) => {
                 collect(canonical_runner_name(runner_name).map(|_| ()), problems);
             }
-            None => problems.push(
-                "GitHub registration locator does not match fingerprint scope".to_owned(),
-            ),
+            None => problems
+                .push("GitHub registration locator does not match fingerprint scope".to_owned()),
         }
     } else if identity.locator.is_empty() || identity.locator.chars().any(char::is_control) {
         problems.push("GitHub registration locator must be non-empty and safe".to_owned());
@@ -817,10 +813,7 @@ fn canonical_repository_slug(value: &str) -> Result<String, CanonicalResourceErr
     Ok(format!("{owner}/{repository}"))
 }
 
-fn canonical_github_name(
-    field: &str,
-    value: &str,
-) -> Result<String, CanonicalResourceError> {
+fn canonical_github_name(field: &str, value: &str) -> Result<String, CanonicalResourceError> {
     if value.is_empty()
         || value.len() > MAX_NAME_LEN
         || !value
@@ -861,9 +854,10 @@ fn canonical_absolute_path(field: &str, value: &str) -> Result<String, Canonical
         )));
     }
     let path = Path::new(value);
-    if path.components().any(|component| {
-        !matches!(component, Component::RootDir | Component::Normal(_))
-    }) {
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::RootDir | Component::Normal(_)))
+    {
         return Err(CanonicalResourceError::single(format!(
             "{field} must not contain path aliases",
         )));
@@ -969,7 +963,9 @@ fn validate_server_url(value: &str) -> Result<(), CanonicalResourceError> {
         || value.ends_with('/')
         || value.contains('?')
         || value.contains('#')
-        || value.chars().any(|character| character.is_control() || character.is_whitespace())
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
     {
         return Err(CanonicalResourceError::single(
             "runner server URL must be canonical HTTPS without query, fragment, or trailing slash",
@@ -1074,7 +1070,7 @@ mod tests {
     use crate::ownership::{ResourceEvidence, ResourceIdentity, ResourceKind};
 
     use super::{
-        AccountPolicy, GithubScope, policy, validate_identity, CANONICAL_RESOURCE_SCHEMA_VERSION,
+        AccountPolicy, CANONICAL_RESOURCE_SCHEMA_VERSION, GithubScope, policy, validate_identity,
     };
 
     const DIGEST_A: &str =
@@ -1092,7 +1088,12 @@ mod tests {
             0o750,
         )
         .expect_err("parent traversal must fail");
-        assert!(error.problems.iter().any(|problem| problem.contains("alias")));
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("alias"))
+        );
     }
 
     #[test]
@@ -1131,8 +1132,16 @@ mod tests {
             ResourceEvidence::none(),
         );
         let problems = validate_identity(&identity);
-        assert!(problems.iter().any(|problem| problem.contains("external ID")));
-        assert!(problems.iter().any(|problem| problem.contains("fingerprint")));
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("external ID"))
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("fingerprint"))
+        );
     }
 
     #[test]
@@ -1240,13 +1249,19 @@ mod tests {
     #[test]
     fn policies_define_required_observation_lanes_and_survival() {
         let registration = policy(ResourceKind::GithubRunnerRegistration);
-        assert_eq!(registration.observation_lanes, [crate::journal::ExecutionLane::Github]);
+        assert_eq!(
+            registration.observation_lanes,
+            [crate::journal::ExecutionLane::Github]
+        );
         assert!(registration.survival.host_restore);
         assert!(!registration.survival.repository_transfer);
         assert!(!registration.survival.runner_reregistration);
 
         let image = policy(ResourceKind::PodmanImage);
-        assert_eq!(image.observation_lanes, [crate::journal::ExecutionLane::RunnerUser]);
+        assert_eq!(
+            image.observation_lanes,
+            [crate::journal::ExecutionLane::RunnerUser]
+        );
         assert!(!image.survival.host_restore);
     }
 
@@ -1261,10 +1276,10 @@ mod tests {
             AccountPolicy::Service,
         )
         .expect("Linux user");
-        assert!(identity
-            .evidence
-            .fingerprint
-            .as_deref()
-            .is_some_and(|value| value.contains(&format!("-v{CANONICAL_RESOURCE_SCHEMA_VERSION}:"))));
+        assert!(
+            identity.evidence.fingerprint.as_deref().is_some_and(
+                |value| value.contains(&format!("-v{CANONICAL_RESOURCE_SCHEMA_VERSION}:"))
+            )
+        );
     }
 }

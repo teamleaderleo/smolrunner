@@ -407,12 +407,12 @@ fn is_linux_user(value: &str) -> bool {
         })
 }
 
-fn validate_desired_resource(
-    field: &str,
-    resource: &ResourceIdentity,
-    problems: &mut Vec<String>,
-) {
-    extend_resource_problems(field, crate::resource::validate_identity(resource), problems);
+fn validate_desired_resource(field: &str, resource: &ResourceIdentity, problems: &mut Vec<String>) {
+    extend_resource_problems(
+        field,
+        crate::resource::validate_identity(resource),
+        problems,
+    );
 }
 
 fn validate_observed_resource(
@@ -476,12 +476,9 @@ mod tests {
         let scope = GithubScope::repository(42, "example/project").expect("scope");
         external_id.map_or_else(
             || {
-                let mut identity = ResourceIdentity::github_runner_registration(
-                    scope,
-                    "project-vps",
-                    42,
-                )
-                .expect("registration");
+                let mut identity =
+                    ResourceIdentity::github_runner_registration(scope, "project-vps", 42)
+                        .expect("registration");
                 identity.evidence = super::ResourceEvidence::none();
                 identity
             },
