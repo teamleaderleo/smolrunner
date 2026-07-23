@@ -92,7 +92,7 @@ These values describe expected evidence durability, not permission to mutate aft
 - Untrusted markers with missing evidence can be classified as unknown instead of being rejected as absent.
 - Evidence that is present but malformed fails validation before ownership classification.
 - Complete and partial validation share the same kind-specific canonical parser; partial validation permits absence, never alternate formats.
-- Managed classification requires immutable evidence in the ownership marker itself; matching desired and observed evidence cannot complete an incomplete marker.
+- Managed classification requires the resource kind's complete minimum immutable evidence in the ownership marker itself; matching desired and observed evidence cannot complete an incomplete marker.
 - Live probes must execute only in the lanes listed above.
 - State persistence and lane execution remain blocked by issues #11 and #12.
 
