@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
-    JOURNAL_SCHEMA_VERSION, ActionOutcome, ExecutionJournal, ExecutionLane, JournalRecord,
+    ActionOutcome, ExecutionJournal, ExecutionLane, JOURNAL_SCHEMA_VERSION, JournalRecord,
     PlannedMutation, Preconditions, RollbackClass, validate_plan,
 };
 use crate::state::{InstallationId, JournalId};
@@ -399,10 +399,17 @@ fn validate_stop_position(journal: &ExecutionJournal, problems: &mut Vec<String>
         .records
         .iter()
         .enumerate()
-        .filter(|(_, record)| matches!(record.outcome, ActionOutcome::Failed | ActionOutcome::Skipped))
+        .filter(|(_, record)| {
+            matches!(
+                record.outcome,
+                ActionOutcome::Failed | ActionOutcome::Skipped
+            )
+        })
         .collect::<Vec<_>>();
     if stopping_records.len() > 1 {
-        problems.push("execution journal contains more than one failed or skipped stop record".to_owned());
+        problems.push(
+            "execution journal contains more than one failed or skipped stop record".to_owned(),
+        );
     }
 
     match journal.stopped_after.as_deref() {
@@ -429,9 +436,8 @@ fn validate_stop_position(journal: &ExecutionJournal, problems: &mut Vec<String>
                 journal.records[stop_index].outcome,
                 ActionOutcome::Failed | ActionOutcome::Skipped
             ) {
-                problems.push(
-                    "stopped_after must name the failed or skipped stop record".to_owned(),
-                );
+                problems
+                    .push("stopped_after must name the failed or skipped stop record".to_owned());
             }
             if journal.records[..stop_index]
                 .iter()
@@ -466,7 +472,7 @@ mod tests {
     use serde_json::json;
 
     use crate::journal::{
-        JOURNAL_SCHEMA_VERSION, ActionOutcome, ExecutionJournal, ExecutionLane, JournalRecord,
+        ActionOutcome, ExecutionJournal, ExecutionLane, JOURNAL_SCHEMA_VERSION, JournalRecord,
         PlannedMutation, Preconditions, RollbackClass,
     };
     use crate::state::{InstallationId, JournalId};
@@ -532,12 +538,22 @@ mod tests {
             .expect("serialize journal value");
         value["schema_version"] = json!(2);
         let error = decode_journal_document(&value.to_string()).expect_err("forward version");
-        assert!(error.problems.iter().any(|problem| problem.contains("version 2")));
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("version 2"))
+        );
 
         value["schema_version"] = json!(1);
         value["journal"]["schema_version"] = json!(2);
         let error = decode_journal_document(&value.to_string()).expect_err("journal version");
-        assert!(error.problems.iter().any(|problem| problem.contains("version 2")));
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("version 2"))
+        );
     }
 
     #[test]
