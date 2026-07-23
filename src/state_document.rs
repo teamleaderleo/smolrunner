@@ -21,12 +21,27 @@ pub enum StateDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectStateDocument {
-    pub schema_version: u8,
-    pub installation_id: InstallationId,
-    pub project: ProjectIdentity,
+    schema_version: u8,
+    installation_id: InstallationId,
+    project: ProjectIdentity,
 }
 
 impl ProjectStateDocument {
+    #[must_use]
+    pub fn schema_version(&self) -> u8 {
+        self.schema_version
+    }
+
+    #[must_use]
+    pub fn installation_id(&self) -> &InstallationId {
+        &self.installation_id
+    }
+
+    #[must_use]
+    pub fn project(&self) -> &ProjectIdentity {
+        &self.project
+    }
+
     /// Build a validated project-state document.
     ///
     /// # Errors
@@ -47,11 +62,21 @@ impl ProjectStateDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResourceStateDocument {
-    pub schema_version: u8,
-    pub marker: OwnershipMarker,
+    schema_version: u8,
+    marker: OwnershipMarker,
 }
 
 impl ResourceStateDocument {
+    #[must_use]
+    pub fn schema_version(&self) -> u8 {
+        self.schema_version
+    }
+
+    #[must_use]
+    pub fn marker(&self) -> &OwnershipMarker {
+        &self.marker
+    }
+
     /// Build a validated resource-state document from one complete ownership marker.
     ///
     /// # Errors
@@ -400,7 +425,10 @@ mod tests {
             .expect("valid project document"),
         );
         let encoded = encode_state_document(&document).expect("encode document");
-        assert_eq!(decode_state_document(&encoded).expect("decode document"), document);
+        assert_eq!(
+            decode_state_document(&encoded).expect("decode document"),
+            document
+        );
     }
 
     #[test]
@@ -409,7 +437,10 @@ mod tests {
             ResourceStateDocument::new(marker()).expect("valid resource document"),
         );
         let encoded = encode_state_document(&document).expect("encode document");
-        assert_eq!(decode_state_document(&encoded).expect("decode document"), document);
+        assert_eq!(
+            decode_state_document(&encoded).expect("decode document"),
+            document
+        );
     }
 
     #[test]
@@ -444,8 +475,14 @@ mod tests {
                 }
             }
         });
-        let error = decode_state_document(&value.to_string()).expect_err("forward version must fail");
-        assert!(error.problems.iter().any(|problem| problem.contains("version 2")));
+        let error =
+            decode_state_document(&value.to_string()).expect_err("forward version must fail");
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("version 2"))
+        );
     }
 
     #[test]
