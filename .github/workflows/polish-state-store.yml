@@ -1,0 +1,52 @@
+name: Polish state store contract
+
+on:
+  push:
+    branches: [feature/state-store-contract]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/state-store-contract
+          fetch-depth: 1
+
+      - name: Apply exact cleanup and format
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/state_store.rs')
+          text = path.read_text(encoding='utf-8')
+          old = '    InstallationId, JournalId, ResourceRecordId, StateLayout, StatePath,\n'
+          new = '    InstallationId, ResourceRecordId, StateLayout, StatePath,\n'
+          if text.count(old) != 1:
+              raise SystemExit('expected exact unused import once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          cargo fmt --all
+          rm -f \
+            .github/workflows/polish-state-store.yml \
+            .tmp/polish-state-store
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit polished source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'style: polish state store contract'
+          git push origin HEAD:feature/state-store-contract
