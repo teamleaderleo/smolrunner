@@ -15,6 +15,8 @@ Every resource identity has a kind, canonical locator, optional external ID, and
 
 Fingerprints use a kind-specific `KIND-v1:` prefix followed by canonical JSON with unknown fields rejected. Digests use lowercase `sha256:` plus 64 hexadecimal characters.
 
+Desired-state validation and observation validation are intentionally separate. A desired identity with missing required evidence is invalid and cannot enter planning. An observed or marker identity with missing evidence is structurally valid but incomplete, allowing ownership classification to return `unknown` rather than misreporting absence. Malformed evidence fails both validation paths.
+
 ### Linux user
 
 - Locator: exact safe lowercase username.
