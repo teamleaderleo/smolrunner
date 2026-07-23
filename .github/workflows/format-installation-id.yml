@@ -1,0 +1,43 @@
+name: Format installation ID generation
+
+on:
+  push:
+    branches: [feature/installation-id-generation]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/installation-id-generation
+          fetch-depth: 1
+
+      - name: Format source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cargo fmt --all
+          rm -f \
+            .github/workflows/format-installation-id.yml \
+            .tmp/format-installation-id \
+            .tmp/format-installation-id-2
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+      - name: Commit formatted source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'style: format installation ID generation'
+          git push origin HEAD:feature/installation-id-generation
