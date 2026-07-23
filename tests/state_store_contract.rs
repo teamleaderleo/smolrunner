@@ -1,4 +1,4 @@
-use smolrunner::state::StatePath;
+use smolrunner::state::{InstallationId, StateLayout, StatePath};
 use smolrunner::state_store::{
     StateRead, StateRecord, StateStore, StateStoreError, StateStoreErrorKind,
     StateWriteDisposition, StateWriteReceipt,
@@ -27,9 +27,12 @@ impl StateStore for ExternalStore {
 
 #[test]
 fn external_store_implementations_can_return_bounded_public_results() {
+    let installation_id =
+        InstallationId::parse("0123456789abcdef").expect("valid installation ID");
+    let path = StateLayout::installation(&installation_id);
     let store = ExternalStore;
     let error = store
-        .read(unsafe_unreachable_state_path())
+        .read(&path)
         .expect_err("test store reports a bounded busy error");
 
     assert_eq!(error.kind(), StateStoreErrorKind::Busy);
@@ -38,8 +41,4 @@ fn external_store_implementations_can_return_bounded_public_results() {
     let receipt = StateWriteReceipt::new(StateWriteDisposition::Created, 42);
     assert_eq!(receipt.disposition(), StateWriteDisposition::Created);
     assert_eq!(receipt.bytes_written(), 42);
-}
-
-fn unsafe_unreachable_state_path() -> &'static StatePath {
-    panic!("the rejecting test store never inspects its path argument")
 }
