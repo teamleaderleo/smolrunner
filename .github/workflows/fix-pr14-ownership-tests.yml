@@ -1,0 +1,106 @@
+name: Fix PR 14 ownership evidence tests
+
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - src/ownership.rs
+      - .tmp/pr14-tests.txt
+      - .github/workflows/fix-pr14-ownership-tests.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/canonical-resource-evidence'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact head branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+
+      - name: Preserve complete desired evidence and clean diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f src/ownership.rs
+          test ! -L src/ownership.rs
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/ownership.rs")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  "    if marker.resource.evidence.is_empty() && desired.evidence.is_empty() {",
+                  "    if marker.resource.evidence.is_empty() {",
+              ),
+              (
+                  '''        let desired = runner(None);
+                  let marker = OwnershipMarker::new(
+                      context.installation_id.clone(),
+                      context.project.clone(),
+                      desired.clone(),
+                  );
+                  let observed = ObservedResource {
+                      identity: desired.clone(),
+                      marker: Some(marker),
+                  };''',
+                  '''        let desired = runner(Some("runner-id-42"));
+                  let marker = OwnershipMarker::new(
+                      context.installation_id.clone(),
+                      context.project.clone(),
+                      runner(None),
+                  );
+                  let observed = ObservedResource {
+                      identity: desired.clone(),
+                      marker: Some(marker),
+                  };''',
+              ),
+              (
+                  '''        let desired = runner(None);
+                  let observed = ObservedResource {
+                      identity: desired.clone(),
+                      marker: None,
+                  };''',
+                  '''        let desired = runner(Some("runner-id-42"));
+                  let observed = ObservedResource {
+                      identity: runner(None),
+                      marker: None,
+                  };''',
+              ),
+          ]
+
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected exactly one replacement target: {old.splitlines()[0]!r}")
+              text = text.replace(old, new)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          cargo fmt --all
+          rm -f \
+            .tmp/pr14-tests.txt \
+            .github/workflows/fix-pr14-ownership-tests.yml
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A -- \
+            src/ownership.rs \
+            .tmp/pr14-tests.txt \
+            .github/workflows/fix-pr14-ownership-tests.yml
+          git commit -m 'fix: require evidence in managed ownership markers'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
