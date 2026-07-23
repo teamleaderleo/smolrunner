@@ -6,6 +6,8 @@ pub mod journal_document;
 pub mod linux_state;
 #[cfg(target_os = "linux")]
 pub mod linux_state_prepare;
+#[cfg(target_os = "linux")]
+pub mod linux_state_recovery;
 pub mod manifest;
 pub mod ownership;
 pub mod plan;
