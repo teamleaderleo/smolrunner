@@ -474,24 +474,20 @@ mod tests {
 
     fn runner(external_id: Option<&str>) -> ResourceIdentity {
         let scope = GithubScope::repository(42, "example/project").expect("scope");
-        match external_id {
-            None => {
-                let mut identity =
-                    ResourceIdentity::github_runner_registration(scope, "project-vps", 42)
-                        .expect("registration");
-                identity.evidence = super::ResourceEvidence::none();
-                identity
-            }
-            Some(external_id) => {
-                let runner_id = external_id
-                    .strip_prefix("runner-id-")
-                    .expect("test runner ID prefix")
-                    .parse::<u64>()
-                    .expect("test runner ID");
-                ResourceIdentity::github_runner_registration(scope, "project-vps", runner_id)
-                    .expect("registration")
-            }
+        let runner_id = external_id.map_or(42, |external_id| {
+            external_id
+                .strip_prefix("runner-id-")
+                .expect("test runner ID prefix")
+                .parse::<u64>()
+                .expect("test runner ID")
+        });
+        let mut identity =
+            ResourceIdentity::github_runner_registration(scope, "project-vps", runner_id)
+                .expect("registration");
+        if external_id.is_none() {
+            identity.evidence = super::ResourceEvidence::none();
         }
+        identity
     }
 
     #[test]
