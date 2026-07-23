@@ -172,7 +172,7 @@ impl StateWriteReceipt {
         self.bytes_written
     }
 
-    pub(crate) const fn new(disposition: StateWriteDisposition, bytes_written: usize) -> Self {
+    pub const fn new(disposition: StateWriteDisposition, bytes_written: usize) -> Self {
         Self {
             disposition,
             bytes_written,
@@ -206,7 +206,7 @@ impl StateStoreError {
         &self.public_message
     }
 
-    pub(crate) fn public(kind: StateStoreErrorKind, message: impl Into<String>) -> Self {
+    pub fn public(kind: StateStoreErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
             public_message: message.into(),
