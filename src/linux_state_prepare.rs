@@ -303,8 +303,8 @@ mod tests {
         fs::set_permissions(&installations, fs::Permissions::from_mode(0o750))
             .expect("set installations mode");
 
-        let receipt = prepare_installation(root.path(), &installation_id())
-            .expect("complete partial tree");
+        let receipt =
+            prepare_installation(root.path(), &installation_id()).expect("complete partial tree");
         assert_eq!(receipt.created_directories(), 3);
     }
 
