@@ -77,6 +77,8 @@ fn encode_installation_id(
 mod tests {
     use std::collections::BTreeSet;
 
+    use crate::state::InstallationId;
+
     use super::{INSTALLATION_RANDOM_BYTES, encode_installation_id, generate_installation_id};
 
     #[test]
@@ -107,6 +109,10 @@ mod tests {
                     .as_str()
                     .bytes()
                     .all(|byte| { byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) })
+            );
+            assert_eq!(
+                InstallationId::parse(installation_id.as_str()).expect("round-trip generated ID"),
+                installation_id
             );
             assert!(generated.insert(installation_id.as_str().to_owned()));
         }
