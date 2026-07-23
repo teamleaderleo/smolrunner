@@ -364,10 +364,10 @@ impl ResourceIdentity {
             runner_version: runner_version.to_owned(),
         };
         let fingerprint = encode_fingerprint("runner-installation", &fingerprint)?;
-        let evidence = runner_id.map_or_else(
-            || ResourceEvidence::fingerprint(fingerprint.clone()),
-            |id| ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
-        );
+        let evidence = match runner_id {
+            Some(id) => ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
+            None => ResourceEvidence::fingerprint(fingerprint),
+        };
         Ok(Self::new(
             ResourceKind::RunnerInstallation,
             directory,
