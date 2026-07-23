@@ -1,0 +1,75 @@
+name: PR 14 canonical fix
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.number == 14 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/canonical-resource-evidence'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact same-repository head branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ github.repository }}
+          ref: feature/canonical-resource-evidence
+          fetch-depth: 1
+
+      - name: Apply the reviewed compiler fixes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f src/resource.rs
+          test ! -L src/resource.rs
+          test -f src/ownership.rs
+          test ! -L src/ownership.rs
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          resource = Path("src/resource.rs")
+          text = resource.read_text(encoding="utf-8")
+          old = '''        let evidence = runner_id.map_or_else(
+              || ResourceEvidence::fingerprint(fingerprint.clone()),
+              |id| ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
+          );'''
+          new = '''        let evidence = match runner_id {
+              Some(id) => ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
+              None => ResourceEvidence::fingerprint(fingerprint),
+          };'''
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one runner evidence expression")
+          resource.write_text(text.replace(old, new), encoding="utf-8")
+
+          ownership = Path("src/ownership.rs")
+          text = ownership.read_text(encoding="utf-8")
+          old = 'ResourceIdentity::github_runner_registration(scope, "project-vps", 42)'
+          new = 'ResourceIdentity::github_runner_registration(scope.clone(), "project-vps", 42)'
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one moved scope expression")
+          ownership.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+          rustfmt --edition 2024 src/resource.rs src/ownership.rs
+          rm -f .github/workflows/apply-canonical-fixes.yml
+          git diff --check
+
+      - name: Commit the bounded correction
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/resource.rs src/ownership.rs .github/workflows/apply-canonical-fixes.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: resolve canonical evidence ownership moves'
+          git push origin HEAD:feature/canonical-resource-evidence
