@@ -177,19 +177,23 @@ pub fn execute_plan(
             .collect(),
         stopped_after: None,
     };
-    let mut completed = Vec::<(usize, ActionReceipt)>::new();
 
-    for index in 0..journal.records.len() {
-        if journal.records[index].action.rollback == RollbackClass::Irreversible
-            && !allow_irreversible
+    if !allow_irreversible {
+        if let Some(index) = journal
+            .records
+            .iter()
+            .position(|record| record.action.rollback == RollbackClass::Irreversible)
         {
             journal.records[index].outcome = ActionOutcome::Skipped;
             journal.records[index].message =
                 Some("irreversible action requires explicit confirmation".to_owned());
             journal.stopped_after = Some(journal.records[index].action.id.clone());
-            break;
+            return journal;
         }
+    }
 
+    let mut completed = Vec::<(usize, ActionReceipt)>::new();
+    for index in 0..journal.records.len() {
         match executor.execute(&journal.records[index].action) {
             Ok(receipt) => {
                 journal.records[index].outcome = ActionOutcome::Completed;
@@ -399,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn irreversible_action_is_skipped_without_confirmation() {
+    fn irreversible_action_blocks_the_batch_without_confirmation() {
         let mut executor = FakeExecutor::default();
         let journal = execute_plan(
             vec![
@@ -411,10 +415,10 @@ mod tests {
             false,
         );
 
-        assert_eq!(journal.records[0].outcome, ActionOutcome::Completed);
+        assert_eq!(journal.records[0].outcome, ActionOutcome::Pending);
         assert_eq!(journal.records[1].outcome, ActionOutcome::Skipped);
         assert_eq!(journal.records[2].outcome, ActionOutcome::Pending);
-        assert_eq!(executor.executions, ["safe"]);
+        assert!(executor.executions.is_empty());
     }
 
     #[test]
