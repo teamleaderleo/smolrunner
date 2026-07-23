@@ -16,9 +16,12 @@ SmolRunner should remain useful while it is still small. The roadmap favors a de
 - [x] `smolrunner plan` that makes no changes.
 - [x] Typed current-host observations with present, absent, and unknown state.
 - [x] Shell-free command execution records with an empty child environment and explicit secret redaction.
+- [x] Typed execution lanes, precondition evidence, rollback classes, and partial-failure journals.
+- [x] ADR for privilege separation, adoption, token handling, and rollback semantics.
+- [ ] Durable ownership markers and adoption evidence for real host resources.
+- [ ] Atomic journal persistence and crash recovery.
+- [ ] Root and runner-user lane implementations.
 - [ ] Debian and Ubuntu host preparation.
-- [ ] Explicit rollback records for every host mutation.
-- [ ] Root-versus-runner-user privilege separation and adoption of existing installations.
 
 ## Milestone 2 — runner lifecycle
 

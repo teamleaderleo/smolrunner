@@ -1,5 +1,6 @@
 pub mod doctor;
 pub mod host;
+pub mod journal;
 pub mod manifest;
 pub mod plan;
 pub mod process;

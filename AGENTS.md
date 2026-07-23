@@ -9,11 +9,12 @@ Do not turn SmolRunner into a new pipeline language, runner protocol, deployment
 ## Current priorities
 
 1. Preserve the threat-model invariants in `docs/THREAT_MODEL.md`.
-2. Build a dependable CLI and structured state model before adding a daemon, TUI, or web dashboard.
-3. Prefer idempotent plans and explicit reconciliation over one-shot shell setup.
-4. Keep project-specific build and test behavior inside each enrolled repository.
-5. Unknown manifest fields and versions must fail closed.
-6. Distinguish proven absence from unknown state; never mutate based on an unproven assumption.
+2. Follow the privilege, adoption, and rollback decisions in `docs/adr/0001-privilege-adoption-and-rollback.md`.
+3. Build a dependable CLI and structured state model before adding a daemon, TUI, or web dashboard.
+4. Prefer idempotent plans and explicit reconciliation over one-shot shell setup.
+5. Keep project-specific build and test behavior inside each enrolled repository.
+6. Unknown manifest fields and versions must fail closed.
+7. Distinguish proven absence from unknown state; never mutate based on an unproven assumption.
 
 ## Required checks
 
@@ -21,12 +22,12 @@ Before declaring a change ready:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo run --quiet -- --output json doctor
-cargo run --quiet -- plan --file examples/quarry.yml
-cargo run --quiet -- --output json plan --file examples/glossless.yml
-cargo run --quiet -- --output json host plan --file examples/quarry.yml
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo run --locked --quiet -- --output json doctor
+cargo run --locked --quiet -- plan --file examples/quarry.yml
+cargo run --locked --quiet -- --output json plan --file examples/glossless.yml
+cargo run --locked --quiet -- --output json host plan --file examples/quarry.yml
 ```
 
 A doctor warning is acceptable on a development machine that lacks Podman or systemd. A doctor failure must be understood and documented. Planning must never mutate the filesystem, users, services, containers, or GitHub state.
@@ -36,8 +37,14 @@ A doctor warning is acceptable on a development machine that lacks Podman or sys
 - Unsafe Rust is forbidden.
 - Human output and JSON output must be derived from the same typed report.
 - Never print registration tokens, app keys, repository credentials, or secret environment values.
+- Commit `Cargo.lock` and use locked Cargo operations for this binary application.
+- Pin third-party GitHub Actions to reviewed commit SHAs.
 - Every host mutation must eventually support plan/dry-run behavior and a clear rollback path.
-- Do not add an apply path until root-versus-runner-user execution, rollback journaling, partial failures, adoption of existing installations, and registration-token lifetime are explicitly designed.
+- Invalid mutation plans must fail before the first executor call.
+- Irreversible actions must block the entire batch before the first mutation unless explicitly confirmed.
+- Rollback and compensation run in reverse completion order; do not describe compensation as restoration.
+- Public journals may contain only public receipts and public failures.
+- Do not add an apply path until durable ownership markers, root elevation, runner-user execution, journal persistence, GitHub credential acquisition, and package-operation rollback classes are concretely designed.
 - Generated subprocesses must use explicit absolute program paths and argument vectors; do not introduce `sh -c` or equivalent implicit shells.
 - Child-process environments must start empty and receive only explicit allowlisted values.
 - Treat output redaction as defense in depth, not proof that a child process cannot transform or leak a secret.

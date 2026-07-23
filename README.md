@@ -25,23 +25,23 @@ SmolRunner keeps GitHub as the workflow scheduler, status UI, and log store. It 
 Inspect whether the current machine has the basic SmolRunner prerequisites:
 
 ```bash
-cargo run -- doctor
-cargo run -- --output json doctor
-cargo run -- doctor --strict
+cargo run --locked -- doctor
+cargo run --locked -- --output json doctor
+cargo run --locked -- doctor --strict
 ```
 
 Validate a project manifest and print its deterministic desired-state plan:
 
 ```bash
-cargo run -- plan --file examples/quarry.yml
-cargo run -- --output json plan --file examples/glossless.yml
+cargo run --locked -- plan --file examples/quarry.yml
+cargo run --locked -- --output json plan --file examples/glossless.yml
 ```
 
 Compare the manifest with bounded observations from the current Linux host:
 
 ```bash
-cargo run -- host plan --file examples/quarry.yml
-cargo run -- --output json host plan --file examples/glossless.yml
+cargo run --locked -- host plan --file examples/quarry.yml
+cargo run --locked -- --output json host plan --file examples/glossless.yml
 ```
 
 `doctor` probes Linux support, architecture, systemd, cgroup v2, Podman, and Git. `plan` validates the versioned manifest and describes the runner user, registration, container image, and disposable verification boundary SmolRunner would eventually reconcile. `host plan` additionally reads bounded host state and distinguishes proven absence from facts that still need a privileged or authenticated inspection path. All commands are read-only, and human and JSON output come from the same typed reports.
@@ -89,6 +89,8 @@ SmolRunner models desired state, current state, proposed actions, and execution 
 
 The process layer is shell-free, clears ambient environment variables, requires absolute program paths, captures structured results, and redacts explicitly marked secret values. It is not yet connected to any mutation command. See [host reconciliation](docs/HOST_RECONCILIATION.md).
 
+The execution-journal model assigns every future mutation an immutable ID, execution lane, rollback class, and precondition evidence. Invalid plans never reach an executor, unconfirmed irreversible work blocks the whole batch before its first mutation, and partial failures retain reverse-order rollback, compensation, and rollback-failure outcomes. The accepted architecture is recorded in [ADR 0001](docs/adr/0001-privilege-adoption-and-rollback.md).
+
 ## Intended workflow
 
 The planned interface is deliberately small:
@@ -116,16 +118,16 @@ smolrunner remove
 
 ## Development
 
-Rust 2024 stable is used. The repository checks formatting, Clippy, tests, doctor output, reference plans, and read-only host planning:
+Rust 2024 stable is used. The repository commits `Cargo.lock` and checks formatting, locked dependency resolution, Clippy, tests, doctor output, reference plans, and read-only host planning:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo run --quiet -- --output json doctor
-cargo run --quiet -- plan --file examples/quarry.yml
-cargo run --quiet -- --output json plan --file examples/glossless.yml
-cargo run --quiet -- --output json host plan --file examples/quarry.yml
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo run --locked --quiet -- --output json doctor
+cargo run --locked --quiet -- plan --file examples/quarry.yml
+cargo run --locked --quiet -- --output json plan --file examples/glossless.yml
+cargo run --locked --quiet -- --output json host plan --file examples/quarry.yml
 ```
 
 ## Project documents
@@ -133,6 +135,7 @@ cargo run --quiet -- --output json host plan --file examples/quarry.yml
 - [Threat model](docs/THREAT_MODEL.md)
 - [Manifest reference](docs/MANIFEST.md)
 - [Host reconciliation](docs/HOST_RECONCILIATION.md)
+- [ADR 0001: privilege, adoption, and rollback](docs/adr/0001-privilege-adoption-and-rollback.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
