@@ -1,0 +1,127 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded anstyle v1.0.14
+  Downloaded equivalent v1.0.2
+  Downloaded anstyle-query v1.1.5
+  Downloaded itoa v1.0.18
+  Downloaded clap_derive v4.6.4
+  Downloaded serde v1.0.229
+  Downloaded syn v3.0.3
+  Downloaded anstyle-parse v1.0.0
+  Downloaded is_terminal_polyfill v1.70.2
+  Downloaded serde_derive v1.0.229
+  Downloaded clap_lex v1.1.0
+  Downloaded heck v0.5.0
+  Downloaded ryu v1.0.23
+  Downloaded anstream v1.0.0
+  Downloaded indexmap v2.14.0
+  Downloaded memchr v2.8.3
+  Downloaded zmij v1.0.23
+  Downloaded colorchoice v1.0.5
+  Downloaded clap_builder v4.6.2
+  Downloaded proc-macro2 v1.0.107
+  Downloaded serde_norway v0.9.42
+  Downloaded unsafe-libyaml-norway v0.2.15
+  Downloaded clap v4.6.4
+  Downloaded serde_core v1.0.229
+  Downloaded hashbrown v0.17.1
+  Downloaded strsim v0.11.1
+  Downloaded unicode-ident v1.0.24
+  Downloaded serde_json v1.0.151
+  Downloaded utf8parse v0.2.2
+  Downloaded quote v1.0.47
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling anstyle v1.0.14
+   Compiling zmij v1.0.23
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling serde v1.0.229
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstream v1.0.0
+   Compiling itoa v1.0.18
+   Compiling clap_lex v1.1.0
+   Compiling strsim v0.11.1
+   Compiling serde_json v1.0.151
+   Compiling heck v0.5.0
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.17.1
+   Compiling clap_builder v4.6.2
+   Compiling syn v3.0.3
+   Compiling indexmap v2.14.0
+   Compiling ryu v1.0.23
+   Compiling memchr v2.8.3
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling serde_derive v1.0.229
+   Compiling clap_derive v4.6.4
+   Compiling clap v4.6.4
+   Compiling serde_norway v0.9.42
+   Compiling smolrunner v0.1.0 (/home/runner/work/smolrunner/smolrunner)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.68s
+     Running unittests src/lib.rs (target/debug/deps/smolrunner-fdb4603a0181789a)
+
+running 41 tests
+test doctor::tests::trims_os_release_quotes ... ok
+test journal::tests::complete_success_is_retained ... ok
+test doctor::tests::doctor_always_returns_checks ... ok
+test journal::tests::invalid_plan_never_reaches_the_executor ... ok
+test journal::tests::irreversible_action_blocks_the_batch_without_confirmation ... ok
+test host::tests::absent_and_unknown_state_are_distinguished ... ok
+test host::tests::present_state_produces_no_actions ... ok
+test journal::tests::journal_serialization_contains_only_public_messages ... ok
+test journal::tests::partial_failure_rolls_back_in_reverse_order ... ok
+test journal::tests::plan_validation_rejects_duplicate_ids_and_missing_evidence ... ok
+test journal::tests::rollback_failure_is_retained ... ok
+test manifest::tests::parses_valid_manifest ... ok
+test manifest::tests::rejects_forward_version ... ok
+test manifest::tests::rejects_parent_paths_and_invalid_users ... ok
+test ownership::tests::exact_marker_and_evidence_are_managed ... ok
+test ownership::tests::invalid_installation_identity_fails_before_classification ... ok
+test manifest::tests::rejects_unknown_fields ... ok
+
+thread 'ownership::tests::marker_without_immutable_evidence_is_not_managed' (3133) panicked at src/ownership.rs:535:18:
+valid ownership: OwnershipValidationError { problems: ["desired: GitHub registration external ID is required", "desired: github-registration fingerprint is required"] }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test ownership::tests::invalid_marker_project_is_rejected ... ok
+test ownership::tests::marker_without_immutable_evidence_is_not_managed ... FAILED
+test ownership::tests::matching_marker_with_missing_observed_evidence_is_unknown ... ok
+test ownership::tests::matching_name_with_foreign_marker_is_protected ... ok
+test ownership::tests::mismatched_immutable_evidence_is_conflicting ... ok
+
+thread 'ownership::tests::names_without_evidence_remain_unknown' (3138) panicked at src/ownership.rs:591:18:
+valid ownership: OwnershipValidationError { problems: ["desired: GitHub registration external ID is required", "desired: github-registration fingerprint is required"] }
+test ownership::tests::missing_required_observation_remains_unknown ... ok
+test ownership::tests::names_without_evidence_remain_unknown ... FAILED
+test ownership::tests::unmarked_exact_evidence_is_only_adoptable ... ok
+test plan::tests::plan_is_stable_and_read_only_by_construction ... ok
+test plan::tests::organization_scope_targets_owner ... ok
+test process::tests::relative_programs_are_rejected ... ok
+test process::tests::serialization_and_debug_output_redact_secrets ... ok
+test resource::tests::constructors_emit_valid_kind_specific_identity ... ok
+test resource::tests::duplicate_runner_names_are_disambiguated_by_scope_and_runner_id ... ok
+test resource::tests::escaped_systemd_names_are_accepted_and_raw_spaces_are_rejected ... ok
+test resource::tests::mutable_image_tag_without_digest_is_invalid ... ok
+test resource::tests::fingerprint_schema_is_versioned ... ok
+test resource::tests::path_aliases_are_rejected ... ok
+test resource::tests::policies_define_required_observation_lanes_and_survival ... ok
+test resource::tests::repository_scope_is_case_canonical ... ok
+test resource::tests::repository_transfer_changes_fingerprint_but_not_numeric_scope_locator ... ok
+test resource::tests::runner_reregistration_changes_external_id ... ok
+test tests::report_uses_most_severe_status ... ok
+test process::tests::process_output_is_redacted ... ok
+
+failures:
+
+failures:
+    ownership::tests::marker_without_immutable_evidence_is_not_managed
+    ownership::tests::names_without_evidence_remain_unknown
+
+test result: FAILED. 39 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`
+
+exit_status=101
