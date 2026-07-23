@@ -93,6 +93,8 @@ The execution-journal model assigns every future mutation an immutable ID, execu
 
 The ownership model protects existing infrastructure from name-based adoption. A resource is managed only when its versioned marker, project identity, host installation identity, locator, and required immutable evidence all match. An exact unmarked match is merely adoptable and still requires explicit confirmation; foreign, conflicting, and unknown state remains protected. The planned system state root is `/var/lib/smolrunner`, but no state-writing path exists yet. See [ADR 0002](docs/adr/0002-durable-ownership-state.md).
 
+Canonical constructors now define exact locators and minimum evidence for Linux users, managed directories, systemd services, official runner installations, rootless Podman images, and GitHub runner registrations. Desired identities cannot be created from names, mutable image tags, or labels alone; partial observations may omit evidence only so ownership classification can return `unknown`. The model also records which execution lane must collect each observation and which evidence survives host restore, repository transfer, or runner re-registration. See [ADR 0003](docs/adr/0003-canonical-resource-evidence.md).
+
 ## Intended workflow
 
 The planned interface is deliberately small:
@@ -140,6 +142,7 @@ cargo run --locked --quiet -- --output json host plan --file examples/quarry.yml
 - [Host reconciliation](docs/HOST_RECONCILIATION.md)
 - [ADR 0001: privilege, adoption, and rollback](docs/adr/0001-privilege-adoption-and-rollback.md)
 - [ADR 0002: durable ownership and state identity](docs/adr/0002-durable-ownership-state.md)
+- [ADR 0003: canonical resource evidence](docs/adr/0003-canonical-resource-evidence.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
