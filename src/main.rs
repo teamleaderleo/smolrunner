@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -77,7 +77,7 @@ fn run_doctor(output: OutputFormat, strict: bool) -> ExitCode {
     }
 }
 
-fn run_plan(output: OutputFormat, file: &PathBuf) -> ExitCode {
+fn run_plan(output: OutputFormat, file: &Path) -> ExitCode {
     let manifest = match load(file) {
         Ok(manifest) => manifest,
         Err(error) => {
