@@ -459,7 +459,7 @@ enum EvidenceRequirement {
 }
 
 impl EvidenceRequirement {
-    const fn requires(self, present: bool) -> bool {
+    fn requires(self, present: bool) -> bool {
         self == Self::Complete || present
     }
 }
