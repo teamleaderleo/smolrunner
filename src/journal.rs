@@ -202,18 +202,20 @@ pub fn execute_plan(
         stopped_after: None,
     };
 
-    if !allow_irreversible {
-        if let Some(index) = journal
+    let unconfirmed_irreversible = if allow_irreversible {
+        None
+    } else {
+        journal
             .records
             .iter()
             .position(|record| record.action.rollback == RollbackClass::Irreversible)
-        {
-            journal.records[index].outcome = ActionOutcome::Skipped;
-            journal.records[index].message =
-                Some("irreversible action requires explicit confirmation".to_owned());
-            journal.stopped_after = Some(journal.records[index].action.id.clone());
-            return Ok(journal);
-        }
+    };
+    if let Some(index) = unconfirmed_irreversible {
+        journal.records[index].outcome = ActionOutcome::Skipped;
+        journal.records[index].message =
+            Some("irreversible action requires explicit confirmation".to_owned());
+        journal.stopped_after = Some(journal.records[index].action.id.clone());
+        return Ok(journal);
     }
 
     let mut completed = Vec::<(usize, ActionReceipt)>::new();
