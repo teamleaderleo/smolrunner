@@ -4,6 +4,10 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use smolrunner::doctor::{inspect_host, render_human as render_doctor};
+use smolrunner::host::{
+    HostProbe, LinuxFilesystemProbe, build_plan as build_host_plan,
+    render_human as render_host_plan,
+};
 use smolrunner::manifest::{ManifestError, load};
 use smolrunner::plan::{build, render_human as render_plan};
 
@@ -41,6 +45,21 @@ enum Command {
         #[arg(long, default_value = "smolrunner.yml")]
         file: PathBuf,
     },
+    /// Inspect and plan host-level state without making changes.
+    Host {
+        #[command(subcommand)]
+        command: HostCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HostCommand {
+    /// Compare bounded host observations with a project manifest.
+    Plan {
+        /// Manifest to inspect against the current host.
+        #[arg(long, default_value = "smolrunner.yml")]
+        file: PathBuf,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -49,12 +68,22 @@ struct ErrorReport<'a> {
     error: &'a ManifestError,
 }
 
+#[derive(Debug, Serialize)]
+struct RuntimeErrorReport {
+    schema_version: u8,
+    kind: &'static str,
+    message: String,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
         Command::Doctor { strict } => run_doctor(cli.output, strict),
         Command::Plan { file } => run_plan(cli.output, &file),
+        Command::Host { command } => match command {
+            HostCommand::Plan { file } => run_host_plan(cli.output, &file),
+        },
     }
 }
 
@@ -78,23 +107,9 @@ fn run_doctor(output: OutputFormat, strict: bool) -> ExitCode {
 }
 
 fn run_plan(output: OutputFormat, file: &Path) -> ExitCode {
-    let manifest = match load(file) {
+    let manifest = match load_manifest(output, file) {
         Ok(manifest) => manifest,
-        Err(error) => {
-            match output {
-                OutputFormat::Human => eprint!("{error}"),
-                OutputFormat::Json => {
-                    let report = ErrorReport {
-                        schema_version: 1,
-                        error: &error,
-                    };
-                    if print_json(&report).is_err() {
-                        return ExitCode::from(2);
-                    }
-                }
-            }
-            return ExitCode::from(2);
-        }
+        Err(code) => return code,
     };
     let report = build(&manifest, file);
 
@@ -108,6 +123,66 @@ fn run_plan(output: OutputFormat, file: &Path) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+fn run_host_plan(output: OutputFormat, file: &Path) -> ExitCode {
+    let manifest = match load_manifest(output, file) {
+        Ok(manifest) => manifest,
+        Err(code) => return code,
+    };
+    let current = match LinuxFilesystemProbe.inspect(&manifest) {
+        Ok(current) => current,
+        Err(error) => {
+            let message = format!("failed to inspect host state: {error}");
+            match output {
+                OutputFormat::Human => eprintln!("{message}"),
+                OutputFormat::Json => {
+                    let report = RuntimeErrorReport {
+                        schema_version: 1,
+                        kind: "host_probe",
+                        message,
+                    };
+                    if print_json(&report).is_err() {
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            return ExitCode::from(2);
+        }
+    };
+    let report = build_host_plan(&manifest, current);
+
+    match output {
+        OutputFormat::Human => print!("{}", render_host_plan(&report)),
+        OutputFormat::Json => {
+            if print_json(&report).is_err() {
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn load_manifest(
+    output: OutputFormat,
+    file: &Path,
+) -> Result<smolrunner::manifest::Manifest, ExitCode> {
+    load(file).map_err(|error| {
+        match output {
+            OutputFormat::Human => eprint!("{error}"),
+            OutputFormat::Json => {
+                let report = ErrorReport {
+                    schema_version: 1,
+                    error: &error,
+                };
+                if print_json(&report).is_err() {
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        ExitCode::from(2)
+    })
 }
 
 fn print_json(value: &impl Serialize) -> Result<(), serde_json::Error> {

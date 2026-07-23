@@ -13,6 +13,7 @@ Do not turn SmolRunner into a new pipeline language, runner protocol, deployment
 3. Prefer idempotent plans and explicit reconciliation over one-shot shell setup.
 4. Keep project-specific build and test behavior inside each enrolled repository.
 5. Unknown manifest fields and versions must fail closed.
+6. Distinguish proven absence from unknown state; never mutate based on an unproven assumption.
 
 ## Required checks
 
@@ -25,6 +26,7 @@ cargo test --all-targets --all-features
 cargo run --quiet -- --output json doctor
 cargo run --quiet -- plan --file examples/quarry.yml
 cargo run --quiet -- --output json plan --file examples/glossless.yml
+cargo run --quiet -- --output json host plan --file examples/quarry.yml
 ```
 
 A doctor warning is acceptable on a development machine that lacks Podman or systemd. A doctor failure must be understood and documented. Planning must never mutate the filesystem, users, services, containers, or GitHub state.
@@ -35,6 +37,10 @@ A doctor warning is acceptable on a development machine that lacks Podman or sys
 - Human output and JSON output must be derived from the same typed report.
 - Never print registration tokens, app keys, repository credentials, or secret environment values.
 - Every host mutation must eventually support plan/dry-run behavior and a clear rollback path.
+- Do not add an apply path until root-versus-runner-user execution, rollback journaling, partial failures, adoption of existing installations, and registration-token lifetime are explicitly designed.
+- Generated subprocesses must use explicit absolute program paths and argument vectors; do not introduce `sh -c` or equivalent implicit shells.
+- Child-process environments must start empty and receive only explicit allowlisted values.
+- Treat output redaction as defense in depth, not proof that a child process cannot transform or leak a secret.
 - Use stable system interfaces and invoke existing tools where that is safer than recreating package-manager, systemd, Git, or container-runtime behavior.
 - Avoid adding dependencies without a concrete need and maintenance rationale.
 - Keep Linux-specific code behind a narrow host abstraction so unsupported platforms fail clearly.

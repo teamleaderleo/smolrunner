@@ -1,6 +1,8 @@
 pub mod doctor;
+pub mod host;
 pub mod manifest;
 pub mod plan;
+pub mod process;
 
 use serde::Serialize;
 

@@ -5,7 +5,7 @@
 SmolRunner is a Rust-based steward for small fleets of self-hosted GitHub Actions runners. It is aimed at solo developers and small teams who have ordinary Linux servers, several repositories, and no desire to operate Kubernetes or inherit a full platform-engineering stack.
 
 > [!IMPORTANT]
-> SmolRunner is pre-alpha. The current executable provides host diagnostics and read-only desired-state planning; runner installation and reconciliation are roadmap work.
+> SmolRunner is pre-alpha. The current executable provides host diagnostics and read-only desired-state and host-state planning; runner installation and reconciliation are roadmap work.
 
 ## The problem
 
@@ -22,7 +22,7 @@ SmolRunner keeps GitHub as the workflow scheduler, status UI, and log store. It 
 
 ## Current commands
 
-Inspect the current host:
+Inspect whether the current machine has the basic SmolRunner prerequisites:
 
 ```bash
 cargo run -- doctor
@@ -30,14 +30,21 @@ cargo run -- --output json doctor
 cargo run -- doctor --strict
 ```
 
-Validate a project manifest and print a deterministic plan without changing the host:
+Validate a project manifest and print its deterministic desired-state plan:
 
 ```bash
 cargo run -- plan --file examples/quarry.yml
 cargo run -- --output json plan --file examples/glossless.yml
 ```
 
-`doctor` probes Linux support, architecture, systemd, cgroup v2, Podman, and Git. `plan` validates the versioned manifest and describes the runner user, registration, container image, and disposable verification boundary SmolRunner would eventually reconcile. Human and JSON output are produced from the same typed reports.
+Compare the manifest with bounded observations from the current Linux host:
+
+```bash
+cargo run -- host plan --file examples/quarry.yml
+cargo run -- --output json host plan --file examples/glossless.yml
+```
+
+`doctor` probes Linux support, architecture, systemd, cgroup v2, Podman, and Git. `plan` validates the versioned manifest and describes the runner user, registration, container image, and disposable verification boundary SmolRunner would eventually reconcile. `host plan` additionally reads bounded host state and distinguishes proven absence from facts that still need a privileged or authenticated inspection path. All commands are read-only, and human and JSON output come from the same typed reports.
 
 ## Manifest boundary
 
@@ -76,6 +83,12 @@ Individual repositories continue to own their Containerfiles, dependency install
 
 See the [manifest reference](docs/MANIFEST.md) and the redacted [Quarry](examples/quarry.yml) and [Glossless](examples/glossless.yml) fixtures.
 
+## Reconciliation boundary
+
+SmolRunner models desired state, current state, proposed actions, and execution separately. Current observations are reported as `present`, `absent`, or `unknown`; unknown facts produce inspection actions rather than speculative mutations.
+
+The process layer is shell-free, clears ambient environment variables, requires absolute program paths, captures structured results, and redacts explicitly marked secret values. It is not yet connected to any mutation command. See [host reconciliation](docs/HOST_RECONCILIATION.md).
+
 ## Intended workflow
 
 The planned interface is deliberately small:
@@ -83,6 +96,7 @@ The planned interface is deliberately small:
 ```text
 smolrunner doctor
 smolrunner plan
+smolrunner host plan
 smolrunner host prepare
 smolrunner runner add
 smolrunner project enroll
@@ -102,7 +116,7 @@ smolrunner remove
 
 ## Development
 
-Rust 2024 stable is used. The repository checks formatting, Clippy, tests, doctor output, and both reference plans:
+Rust 2024 stable is used. The repository checks formatting, Clippy, tests, doctor output, reference plans, and read-only host planning:
 
 ```bash
 cargo fmt --all -- --check
@@ -111,12 +125,14 @@ cargo test --all-targets --all-features
 cargo run --quiet -- --output json doctor
 cargo run --quiet -- plan --file examples/quarry.yml
 cargo run --quiet -- --output json plan --file examples/glossless.yml
+cargo run --quiet -- --output json host plan --file examples/quarry.yml
 ```
 
 ## Project documents
 
 - [Threat model](docs/THREAT_MODEL.md)
 - [Manifest reference](docs/MANIFEST.md)
+- [Host reconciliation](docs/HOST_RECONCILIATION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
