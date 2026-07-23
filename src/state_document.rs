@@ -1,7 +1,6 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::manifest::RunnerScope;
 use crate::ownership::{
@@ -134,43 +133,29 @@ pub fn encode_state_document(document: &StateDocument) -> Result<String, StateDo
 ///
 /// # Errors
 ///
-/// Returns an error for malformed JSON, unknown fields, unsupported versions, malformed project
-/// identities, or incomplete resource evidence.
+/// Returns an error for malformed JSON, duplicate or unknown fields, unsupported versions,
+/// malformed project identities, or incomplete resource evidence.
 pub fn decode_state_document(input: &str) -> Result<StateDocument, StateDocumentError> {
-    let envelope: WireEnvelope = serde_json::from_str(input).map_err(|error| {
+    let document: WireStateDocument = serde_json::from_str(input).map_err(|error| {
         StateDocumentError::single(format!("state document JSON is invalid: {error}"))
     })?;
 
-    match envelope.document_type {
-        WireDocumentType::Project => {
-            let wire: WireProjectStateDocument = serde_json::from_value(envelope.document)
-                .map_err(|error| {
-                    StateDocumentError::single(format!("project document is invalid: {error}"))
-                })?;
-            wire.try_into().map(StateDocument::Project)
-        }
-        WireDocumentType::Resource => {
-            let wire: WireResourceStateDocument = serde_json::from_value(envelope.document)
-                .map_err(|error| {
-                    StateDocumentError::single(format!("resource document is invalid: {error}"))
-                })?;
-            wire.try_into().map(StateDocument::Resource)
-        }
+    match document {
+        WireStateDocument::Project(wire) => wire.try_into().map(StateDocument::Project),
+        WireStateDocument::Resource(wire) => wire.try_into().map(StateDocument::Resource),
     }
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WireEnvelope {
-    document_type: WireDocumentType,
-    document: Value,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WireDocumentType {
-    Project,
-    Resource,
+#[serde(
+    tag = "document_type",
+    content = "document",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum WireStateDocument {
+    Project(WireProjectStateDocument),
+    Resource(WireResourceStateDocument),
 }
 
 #[derive(Debug, Deserialize)]
@@ -459,6 +444,30 @@ mod tests {
             "token": "must-never-persist"
         });
         decode_state_document(&value.to_string()).expect_err("unknown field must fail");
+    }
+
+    #[test]
+    fn duplicate_nested_fields_are_rejected() {
+        let input = r#"{
+            "document_type": "project",
+            "document": {
+                "schema_version": 1,
+                "schema_version": 1,
+                "installation_id": "0123456789abcdef",
+                "project": {
+                    "repository": "example/project",
+                    "runner_scope": "repository",
+                    "runner_user": "project-runner"
+                }
+            }
+        }"#;
+        let error = decode_state_document(input).expect_err("duplicate field must fail");
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("duplicate field"))
+        );
     }
 
     #[test]
