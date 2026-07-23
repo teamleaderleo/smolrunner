@@ -40,7 +40,11 @@ pub struct DesiredHostState {
 impl From<&Manifest> for DesiredHostState {
     fn from(manifest: &Manifest) -> Self {
         Self {
-            required_commands: vec!["git".to_owned(), "podman".to_owned(), "systemctl".to_owned()],
+            required_commands: vec![
+                "git".to_owned(),
+                "podman".to_owned(),
+                "systemctl".to_owned(),
+            ],
             runner_user: manifest.runner.user.clone(),
             container_image: manifest.container.image.clone(),
             repository: manifest.repository.clone(),
@@ -143,7 +147,10 @@ pub fn build_plan(manifest: &Manifest, current: CurrentHostState) -> HostPlan {
         "runner-registration",
         HostActionKind::EnsureRunnerRegistration,
         current.runner_registration,
-        format!("ensure GitHub runner registration for {}", desired.repository),
+        format!(
+            "ensure GitHub runner registration for {}",
+            desired.repository
+        ),
     );
 
     HostPlan {
@@ -308,8 +315,7 @@ mod tests {
     use crate::manifest::parse;
 
     use super::{
-        CurrentHostState, HostActionDisposition, HostActionKind, Presence, build_plan,
-        render_human,
+        CurrentHostState, HostActionDisposition, HostActionKind, Presence, build_plan, render_human,
     };
 
     const MANIFEST: &str = r#"
