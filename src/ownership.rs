@@ -186,8 +186,8 @@ impl std::error::Error for OwnershipValidationError {}
 ///
 /// # Errors
 ///
-/// Returns a validation error when project, installation, locator, marker version, or evidence
-/// values are structurally unsafe or incomplete.
+/// Returns a validation error when project, installation, locator, marker, or evidence values are
+/// structurally unsafe.
 pub fn classify(
     context: &OwnershipContext,
     desired: &ResourceIdentity,
@@ -202,11 +202,10 @@ pub fn classify(
         ));
     }
 
-    if let Some(marker) = &observed.marker {
-        return classify_marked(context, desired, observed, marker);
-    }
-
-    classify_unmarked(desired, observed)
+    Ok(observed.marker.as_ref().map_or_else(
+        || classify_unmarked(desired, observed),
+        |marker| classify_marked(context, desired, observed, marker),
+    ))
 }
 
 fn classify_marked(
@@ -214,22 +213,22 @@ fn classify_marked(
     desired: &ResourceIdentity,
     observed: &ObservedResource,
     marker: &OwnershipMarker,
-) -> Result<OwnershipAssessment, OwnershipValidationError> {
+) -> OwnershipAssessment {
     if marker.schema_version != OWNERSHIP_SCHEMA_VERSION {
-        return Ok(OwnershipAssessment::new(
+        return OwnershipAssessment::new(
             OwnershipClass::Unknown,
             format!(
                 "ownership marker version {} is not understood",
                 marker.schema_version
             ),
-        ));
+        );
     }
 
     if marker.project != context.project || marker.installation_id != context.installation_id {
-        return Ok(OwnershipAssessment::new(
+        return OwnershipAssessment::new(
             OwnershipClass::Foreign,
             "the resource is marked for another project or SmolRunner installation",
-        ));
+        );
     }
 
     if marker.resource.kind != observed.identity.kind
@@ -237,68 +236,75 @@ fn classify_marked(
         || marker.resource.kind != desired.kind
         || marker.resource.locator != desired.locator
     {
-        return Ok(OwnershipAssessment::new(
+        return OwnershipAssessment::new(
             OwnershipClass::Conflicting,
             "the ownership marker does not describe the observed and desired resource locator",
-        ));
+        );
+    }
+
+    if marker.resource.evidence.is_empty() && desired.evidence.is_empty() {
+        return OwnershipAssessment::new(
+            OwnershipClass::Unknown,
+            "a marker without immutable resource evidence cannot establish managed ownership",
+        );
     }
 
     match compare_required_evidence(&marker.resource.evidence, &observed.identity.evidence) {
         EvidenceMatch::Mismatch => {
-            return Ok(OwnershipAssessment::new(
+            return OwnershipAssessment::new(
                 OwnershipClass::Conflicting,
                 "observed evidence conflicts with the ownership marker",
-            ));
+            );
         }
         EvidenceMatch::Missing => {
-            return Ok(OwnershipAssessment::new(
+            return OwnershipAssessment::new(
                 OwnershipClass::Unknown,
                 "the ownership marker matches, but required observed evidence is unavailable",
-            ));
+            );
         }
         EvidenceMatch::Exact => {}
     }
 
     match compare_required_evidence(&desired.evidence, &observed.identity.evidence) {
-        EvidenceMatch::Mismatch => Ok(OwnershipAssessment::new(
+        EvidenceMatch::Mismatch => OwnershipAssessment::new(
             OwnershipClass::Conflicting,
             "the managed resource no longer matches desired immutable evidence",
-        )),
-        EvidenceMatch::Missing => Ok(OwnershipAssessment::new(
+        ),
+        EvidenceMatch::Missing => OwnershipAssessment::new(
             OwnershipClass::Unknown,
             "desired immutable evidence cannot be verified from the current observation",
-        )),
-        EvidenceMatch::Exact => Ok(OwnershipAssessment::new(
+        ),
+        EvidenceMatch::Exact => OwnershipAssessment::new(
             OwnershipClass::Managed,
-            "the marker, project, installation, locator, and required evidence match exactly",
-        )),
+            "the marker, project, installation, locator, and immutable evidence match exactly",
+        ),
     }
 }
 
 fn classify_unmarked(
     desired: &ResourceIdentity,
     observed: &ObservedResource,
-) -> Result<OwnershipAssessment, OwnershipValidationError> {
+) -> OwnershipAssessment {
     if desired.evidence.is_empty() {
-        return Ok(OwnershipAssessment::new(
+        return OwnershipAssessment::new(
             OwnershipClass::Unknown,
             "matching names or locators without immutable evidence do not establish ownership",
-        ));
+        );
     }
 
     match compare_required_evidence(&desired.evidence, &observed.identity.evidence) {
-        EvidenceMatch::Exact => Ok(OwnershipAssessment::new(
+        EvidenceMatch::Exact => OwnershipAssessment::new(
             OwnershipClass::Adoptable,
             "the unmarked resource matches exact desired evidence and requires explicit adoption",
-        )),
-        EvidenceMatch::Missing => Ok(OwnershipAssessment::new(
+        ),
+        EvidenceMatch::Missing => OwnershipAssessment::new(
             OwnershipClass::Unknown,
             "the unmarked resource lacks enough evidence for safe adoption",
-        )),
-        EvidenceMatch::Mismatch => Ok(OwnershipAssessment::new(
+        ),
+        EvidenceMatch::Mismatch => OwnershipAssessment::new(
             OwnershipClass::Conflicting,
             "the unmarked resource conflicts with desired immutable evidence",
-        )),
+        ),
     }
 }
 
@@ -309,7 +315,10 @@ enum EvidenceMatch {
     Mismatch,
 }
 
-fn compare_required_evidence(required: &ResourceEvidence, observed: &ResourceEvidence) -> EvidenceMatch {
+fn compare_required_evidence(
+    required: &ResourceEvidence,
+    observed: &ResourceEvidence,
+) -> EvidenceMatch {
     let external = compare_optional_required(&required.external_id, &observed.external_id);
     let fingerprint = compare_optional_required(&required.fingerprint, &observed.fingerprint);
 
@@ -356,18 +365,50 @@ fn validate(
 }
 
 fn validate_project(field: &str, project: &ProjectIdentity, problems: &mut Vec<String>) {
-    if project.repository.is_empty() || !project.repository.contains('/') {
-        problems.push(format!("{field}.repository must be OWNER/REPOSITORY"));
+    let repository_parts = project.repository.split('/').collect::<Vec<_>>();
+    if repository_parts.len() != 2
+        || repository_parts
+            .iter()
+            .any(|part| part.is_empty() || !is_github_name(part))
+    {
+        problems.push(format!(
+            "{field}.repository must be exact OWNER/REPOSITORY"
+        ));
     }
-    if project.runner_user.is_empty() {
-        problems.push(format!("{field}.runner_user must not be empty"));
+
+    if !is_linux_user(&project.runner_user) {
+        problems.push(format!(
+            "{field}.runner_user must be a safe lowercase Linux username"
+        ));
     }
+}
+
+fn is_github_name(value: &str) -> bool {
+    value.len() <= 100
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn is_linux_user(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let first_valid = bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte == b'_');
+    first_valid
+        && value.len() <= 32
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
+        })
 }
 
 fn validate_resource(field: &str, resource: &ResourceIdentity, problems: &mut Vec<String>) {
     if resource.locator.is_empty() || resource.locator.chars().any(char::is_control) {
-        problems.push(format!("{field}.locator must be non-empty and contain no control characters"));
+        problems.push(format!(
+            "{field}.locator must be non-empty and contain no control characters"
+        ));
     }
+
     for (name, value) in [
         ("external_id", &resource.evidence.external_id),
         ("fingerprint", &resource.evidence.fingerprint),
@@ -446,6 +487,28 @@ mod tests {
                 .expect("valid ownership")
                 .class,
             OwnershipClass::Managed
+        );
+    }
+
+    #[test]
+    fn marker_without_immutable_evidence_is_not_managed() {
+        let context = context();
+        let desired = runner(None);
+        let marker = OwnershipMarker::new(
+            context.installation_id.clone(),
+            context.project.clone(),
+            desired.clone(),
+        );
+        let observed = ObservedResource {
+            identity: desired.clone(),
+            marker: Some(marker),
+        };
+
+        assert_eq!(
+            classify(&context, &desired, &observed)
+                .expect("valid ownership")
+                .class,
+            OwnershipClass::Unknown
         );
     }
 
@@ -558,6 +621,29 @@ mod tests {
                 .expect("valid ownership")
                 .class,
             OwnershipClass::Unknown
+        );
+    }
+
+    #[test]
+    fn invalid_marker_project_is_rejected() {
+        let context = context();
+        let desired = runner(Some("runner-id-42"));
+        let marker = OwnershipMarker::new(
+            context.installation_id.clone(),
+            project("not-a-repository"),
+            desired.clone(),
+        );
+        let observed = ObservedResource {
+            identity: desired.clone(),
+            marker: Some(marker),
+        };
+
+        let error = classify(&context, &desired, &observed).expect_err("invalid marker");
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("marker.project.repository"))
         );
     }
 
