@@ -52,6 +52,9 @@ SmolRunner should remain useful while it is still small. The roadmap favors a de
 
 ## Later, only with evidence
 
+- Project cache lifecycle with explicit ownership, quotas, isolation, and cleanup (#21).
+- Bounded workload observations and transparent duration estimates (#21).
+- Agent-readable queued and running status with host capability recommendations (#21).
 - Web dashboard.
 - Background daemon.
 - GitHub App authentication.
