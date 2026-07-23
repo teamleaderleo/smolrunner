@@ -89,6 +89,8 @@ SmolRunner models desired state, current state, proposed actions, and execution 
 
 The process layer is shell-free, clears ambient environment variables, requires absolute program paths, captures structured results, and redacts explicitly marked secret values. It is not yet connected to any mutation command. See [host reconciliation](docs/HOST_RECONCILIATION.md).
 
+The execution-journal model assigns every future mutation an immutable ID, execution lane, rollback class, and precondition evidence. Invalid plans never reach an executor, unconfirmed irreversible work blocks the whole batch before its first mutation, and partial failures retain reverse-order rollback, compensation, and rollback-failure outcomes. The accepted architecture is recorded in [ADR 0001](docs/adr/0001-privilege-adoption-and-rollback.md).
+
 ## Intended workflow
 
 The planned interface is deliberately small:
@@ -133,6 +135,7 @@ cargo run --quiet -- --output json host plan --file examples/quarry.yml
 - [Threat model](docs/THREAT_MODEL.md)
 - [Manifest reference](docs/MANIFEST.md)
 - [Host reconciliation](docs/HOST_RECONCILIATION.md)
+- [ADR 0001: privilege, adoption, and rollback](docs/adr/0001-privilege-adoption-and-rollback.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
