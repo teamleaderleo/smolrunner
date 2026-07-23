@@ -18,8 +18,10 @@ SmolRunner should remain useful while it is still small. The roadmap favors a de
 - [x] Shell-free command execution records with an empty child environment and explicit secret redaction.
 - [x] Typed execution lanes, precondition evidence, rollback classes, and partial-failure journals.
 - [x] ADR for privilege separation, adoption, token handling, and rollback semantics.
-- [ ] Durable ownership markers and adoption evidence for real host resources.
-- [ ] Atomic journal persistence and crash recovery.
+- [x] Pure ownership identity and managed/adoptable/foreign/conflicting/unknown classification.
+- [x] ADR for `/var/lib/smolrunner`, marker identity, and name-safe adoption policy.
+- [ ] Canonical locators and immutable evidence for each real resource kind.
+- [ ] Atomic ownership and journal persistence with crash recovery.
 - [ ] Root and runner-user lane implementations.
 - [ ] Debian and Ubuntu host preparation.
 
