@@ -1,0 +1,46 @@
+name: Check Linux state preparation
+
+on:
+  push:
+    branches: [feature/linux-state-prepare]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/linux-state-prepare
+          fetch-depth: 1
+
+      - name: Format and capture compiler diagnostics
+        shell: bash
+        run: |
+          set +e
+          cargo check --all-targets --all-features --message-format=short > .linux-state-prepare-check.txt 2>&1
+          status=$?
+          printf '\nexit_status=%s\n' "$status" >> .linux-state-prepare-check.txt
+          cargo fmt --all
+          rm -f \
+            .github/workflows/check-linux-state-prepare.yml \
+            .tmp/check-linux-state-prepare
+          rmdir .tmp 2>/dev/null || true
+          git diff --check
+          exit 0
+
+      - name: Commit checked branch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'build: check Linux state preparation'
+          git push origin HEAD:feature/linux-state-prepare
