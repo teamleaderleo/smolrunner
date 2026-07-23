@@ -259,8 +259,7 @@ fn rollback_completed(
                     }
                     Err(failure) => {
                         record.outcome = ActionOutcome::RollbackFailed;
-                        record.message =
-                            Some(format!("{}: {}", failure.code(), failure.message()));
+                        record.message = Some(format!("{}: {}", failure.code(), failure.message()));
                     }
                 }
             }
@@ -322,10 +321,7 @@ mod tests {
     }
 
     impl MutationExecutor for FakeExecutor {
-        fn execute(
-            &mut self,
-            action: &PlannedMutation,
-        ) -> Result<ActionReceipt, ActionFailure> {
+        fn execute(&mut self, action: &PlannedMutation) -> Result<ActionReceipt, ActionFailure> {
             self.executions.push(action.id.clone());
             let _secret_was_available_below_the_journal = !self.private_secret.is_empty();
             if self.fail_execute.contains(&action.id) {
@@ -479,7 +475,12 @@ mod tests {
         let mut executor = FakeExecutor::default();
         let error = execute_plan(invalid, &mut executor, false).expect_err("invalid plan");
 
-        assert!(error.problems.iter().any(|problem| problem.contains("duplicate")));
+        assert!(
+            error
+                .problems
+                .iter()
+                .any(|problem| problem.contains("duplicate"))
+        );
         assert!(executor.executions.is_empty());
     }
 
