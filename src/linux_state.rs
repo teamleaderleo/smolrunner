@@ -7,11 +7,17 @@ use rustix::fs::{self, FileType, Mode, OFlags};
 use rustix::io::Errno;
 
 use crate::state::{STATE_ROOT, StatePath};
-use crate::state_store::{MAX_STATE_DOCUMENT_BYTES, StateRead, StateStoreError, StateStoreErrorKind};
+use crate::state_store::{
+    MAX_STATE_DOCUMENT_BYTES, StateRead, StateStoreError, StateStoreErrorKind,
+};
 
-const DIRECTORY_FLAGS: OFlags =
-    OFlags::RDONLY.union(OFlags::DIRECTORY).union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC);
-const FILE_FLAGS: OFlags = OFlags::RDONLY.union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC);
+const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::DIRECTORY)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
+const FILE_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
 
 /// Read-only descriptor-relative access to one trusted SmolRunner state root.
 #[derive(Debug)]
@@ -40,8 +46,8 @@ impl LinuxStateRoot {
     /// Returns a bounded store error when the root is missing, inaccessible, symlinked, or not a
     /// directory.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateStoreError> {
-        let root = fs::open(path.as_ref(), DIRECTORY_FLAGS, Mode::empty())
-            .map_err(map_root_open_error)?;
+        let root =
+            fs::open(path.as_ref(), DIRECTORY_FLAGS, Mode::empty()).map_err(map_root_open_error)?;
         verify_directory(&root, "state root")?;
         Ok(Self { root })
     }
@@ -149,10 +155,9 @@ fn map_root_open_error(error: Errno) -> StateStoreError {
             StateStoreErrorKind::UnsafeFilesystem,
             "state root is symlinked or not a directory",
         ),
-        Errno::NOENT => StateStoreError::public(
-            StateStoreErrorKind::Io,
-            "state root does not exist",
-        ),
+        Errno::NOENT => {
+            StateStoreError::public(StateStoreErrorKind::Io, "state root does not exist")
+        }
         _ => StateStoreError::public(StateStoreErrorKind::Io, "could not open state root"),
     }
 }
@@ -212,9 +217,7 @@ mod tests {
     }
 
     fn create_project_parent(root: &Path) -> PathBuf {
-        let installation = root
-            .join("installations")
-            .join(installation_id().as_str());
+        let installation = root.join("installations").join(installation_id().as_str());
         fs::create_dir_all(&installation).expect("create project parent");
         installation
     }
@@ -259,8 +262,7 @@ mod tests {
     fn symlinked_parent_is_rejected() {
         let root = TempTree::new("parent-link");
         let outside = TempTree::new("parent-link-outside");
-        symlink(outside.path(), root.path().join("installations"))
-            .expect("create parent symlink");
+        symlink(outside.path(), root.path().join("installations")).expect("create parent symlink");
 
         let reader = LinuxStateRoot::open(root.path()).expect("open state root");
         let error = reader
