@@ -22,12 +22,12 @@ Before declaring a change ready:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo run --quiet -- --output json doctor
-cargo run --quiet -- plan --file examples/quarry.yml
-cargo run --quiet -- --output json plan --file examples/glossless.yml
-cargo run --quiet -- --output json host plan --file examples/quarry.yml
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo run --locked --quiet -- --output json doctor
+cargo run --locked --quiet -- plan --file examples/quarry.yml
+cargo run --locked --quiet -- --output json plan --file examples/glossless.yml
+cargo run --locked --quiet -- --output json host plan --file examples/quarry.yml
 ```
 
 A doctor warning is acceptable on a development machine that lacks Podman or systemd. A doctor failure must be understood and documented. Planning must never mutate the filesystem, users, services, containers, or GitHub state.
@@ -37,6 +37,8 @@ A doctor warning is acceptable on a development machine that lacks Podman or sys
 - Unsafe Rust is forbidden.
 - Human output and JSON output must be derived from the same typed report.
 - Never print registration tokens, app keys, repository credentials, or secret environment values.
+- Commit `Cargo.lock` and use locked Cargo operations for this binary application.
+- Pin third-party GitHub Actions to reviewed commit SHAs.
 - Every host mutation must eventually support plan/dry-run behavior and a clear rollback path.
 - Invalid mutation plans must fail before the first executor call.
 - Irreversible actions must block the entire batch before the first mutation unless explicitly confirmed.
