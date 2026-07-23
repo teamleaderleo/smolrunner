@@ -5,6 +5,7 @@ pub mod manifest;
 pub mod ownership;
 pub mod plan;
 pub mod process;
+pub mod resource;
 
 use serde::Serialize;
 

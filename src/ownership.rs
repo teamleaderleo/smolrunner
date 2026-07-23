@@ -90,7 +90,11 @@ pub struct ResourceIdentity {
 
 impl ResourceIdentity {
     #[must_use]
-    pub fn new(kind: ResourceKind, locator: impl Into<String>, evidence: ResourceEvidence) -> Self {
+    pub(crate) fn new(
+        kind: ResourceKind,
+        locator: impl Into<String>,
+        evidence: ResourceEvidence,
+    ) -> Self {
         Self {
             kind,
             locator: locator.into(),
@@ -347,8 +351,8 @@ fn validate(
     let mut problems = Vec::new();
     validate_token("installation_id", &context.installation_id, &mut problems);
     validate_project("project", &context.project, &mut problems);
-    validate_resource("desired", desired, &mut problems);
-    validate_resource("observed", &observed.identity, &mut problems);
+    validate_desired_resource("desired", desired, &mut problems);
+    validate_observed_resource("observed", &observed.identity, &mut problems);
 
     if let Some(marker) = &observed.marker {
         validate_token(
@@ -357,7 +361,7 @@ fn validate(
             &mut problems,
         );
         validate_project("marker.project", &marker.project, &mut problems);
-        validate_resource("marker.resource", &marker.resource, &mut problems);
+        validate_observed_resource("marker.resource", &marker.resource, &mut problems);
     }
 
     if problems.is_empty() {
@@ -403,26 +407,32 @@ fn is_linux_user(value: &str) -> bool {
         })
 }
 
-fn validate_resource(field: &str, resource: &ResourceIdentity, problems: &mut Vec<String>) {
-    if resource.locator.is_empty() || resource.locator.chars().any(char::is_control) {
-        problems.push(format!(
-            "{field}.locator must be non-empty and contain no control characters"
-        ));
-    }
+fn validate_desired_resource(
+    field: &str,
+    resource: &ResourceIdentity,
+    problems: &mut Vec<String>,
+) {
+    extend_resource_problems(field, crate::resource::validate_identity(resource), problems);
+}
 
-    for (name, value) in [
-        ("external_id", &resource.evidence.external_id),
-        ("fingerprint", &resource.evidence.fingerprint),
-    ] {
-        if value
-            .as_ref()
-            .is_some_and(|value| value.is_empty() || value.chars().any(char::is_control))
-        {
-            problems.push(format!(
-                "{field}.evidence.{name} must be non-empty and contain no control characters"
-            ));
-        }
-    }
+fn validate_observed_resource(
+    field: &str,
+    resource: &ResourceIdentity,
+    problems: &mut Vec<String>,
+) {
+    extend_resource_problems(
+        field,
+        crate::resource::validate_observed_identity(resource),
+        problems,
+    );
+}
+
+fn extend_resource_problems(field: &str, found: Vec<String>, problems: &mut Vec<String>) {
+    problems.extend(
+        found
+            .into_iter()
+            .map(|problem| format!("{field}: {problem}")),
+    );
 }
 
 fn validate_token(field: &str, value: &str, problems: &mut Vec<String>) {
@@ -440,10 +450,11 @@ fn validate_token(field: &str, value: &str, problems: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use crate::manifest::RunnerScope;
+    use crate::resource::GithubScope;
 
     use super::{
         ObservedResource, OwnershipClass, OwnershipContext, OwnershipMarker, ProjectIdentity,
-        ResourceEvidence, ResourceIdentity, ResourceKind, classify,
+        ResourceIdentity, classify,
     };
 
     fn project(repository: &str) -> ProjectIdentity {
@@ -462,10 +473,27 @@ mod tests {
     }
 
     fn runner(external_id: Option<&str>) -> ResourceIdentity {
-        ResourceIdentity::new(
-            ResourceKind::GithubRunnerRegistration,
-            "repository:example/project/runner:project-vps",
-            external_id.map_or_else(ResourceEvidence::none, ResourceEvidence::external_id),
+        let scope = GithubScope::repository(42, "example/project").expect("scope");
+        external_id.map_or_else(
+            || {
+                let mut identity = ResourceIdentity::github_runner_registration(
+                    scope,
+                    "project-vps",
+                    42,
+                )
+                .expect("registration");
+                identity.evidence = super::ResourceEvidence::none();
+                identity
+            },
+            |external_id| {
+                let runner_id = external_id
+                    .strip_prefix("runner-id-")
+                    .expect("test runner ID prefix")
+                    .parse::<u64>()
+                    .expect("test runner ID");
+                ResourceIdentity::github_runner_registration(scope, "project-vps", runner_id)
+                    .expect("registration")
+            },
         )
     }
 
