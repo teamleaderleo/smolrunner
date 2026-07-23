@@ -85,11 +85,13 @@ See the [manifest reference](docs/MANIFEST.md) and the redacted [Quarry](example
 
 ## Reconciliation boundary
 
-SmolRunner models desired state, current state, proposed actions, and execution separately. Current observations are reported as `present`, `absent`, or `unknown`; unknown facts produce inspection actions rather than speculative mutations.
+SmolRunner models desired state, current state, proposed actions, execution, and ownership separately. Current observations are reported as `present`, `absent`, or `unknown`; unknown facts produce inspection actions rather than speculative mutations.
 
 The process layer is shell-free, clears ambient environment variables, requires absolute program paths, captures structured results, and redacts explicitly marked secret values. It is not yet connected to any mutation command. See [host reconciliation](docs/HOST_RECONCILIATION.md).
 
 The execution-journal model assigns every future mutation an immutable ID, execution lane, rollback class, and precondition evidence. Invalid plans never reach an executor, unconfirmed irreversible work blocks the whole batch before its first mutation, and partial failures retain reverse-order rollback, compensation, and rollback-failure outcomes. The accepted architecture is recorded in [ADR 0001](docs/adr/0001-privilege-adoption-and-rollback.md).
+
+The ownership model protects existing infrastructure from name-based adoption. A resource is managed only when its versioned marker, project identity, host installation identity, locator, and required immutable evidence all match. An exact unmarked match is merely adoptable and still requires explicit confirmation; foreign, conflicting, and unknown state remains protected. The planned system state root is `/var/lib/smolrunner`, but no state-writing path exists yet. See [ADR 0002](docs/adr/0002-durable-ownership-state.md).
 
 ## Intended workflow
 
@@ -111,6 +113,7 @@ smolrunner remove
 - **Official runner, managed safely.** SmolRunner does not reimplement the GitHub Actions protocol.
 - **Persistent listener, disposable execution.** Repository code belongs in bounded rootless containers, not directly on the host.
 - **Plan before mutation.** Host changes should be idempotent, inspectable, and reversible.
+- **Prove ownership.** Names and labels never authorize adoption or removal.
 - **Secure defaults.** Fork execution, host sockets, untracked files, and secret inheritance are denied by default.
 - **Boring infrastructure.** Debian or Ubuntu, systemd, cgroup v2, Podman, and one native binary.
 - **Human and agent friendly.** Stable JSON is a first-class interface, not terminal output scraped after the fact.
@@ -136,6 +139,7 @@ cargo run --locked --quiet -- --output json host plan --file examples/quarry.yml
 - [Manifest reference](docs/MANIFEST.md)
 - [Host reconciliation](docs/HOST_RECONCILIATION.md)
 - [ADR 0001: privilege, adoption, and rollback](docs/adr/0001-privilege-adoption-and-rollback.md)
+- [ADR 0002: durable ownership and state identity](docs/adr/0002-durable-ownership-state.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Agent instructions](AGENTS.md)
 
