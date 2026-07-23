@@ -151,9 +151,7 @@ fn inspect_managed_directory(
             format!("{subject} does not have mode 0750"),
         ));
     }
-    if expected_owner
-        .is_some_and(|(uid, gid)| stat.st_uid != uid || stat.st_gid != gid)
-    {
+    if expected_owner.is_some_and(|(uid, gid)| stat.st_uid != uid || stat.st_gid != gid) {
         return Err(StateStoreError::public(
             StateStoreErrorKind::UnsafeFilesystem,
             format!("{subject} has an unexpected owner or group"),
