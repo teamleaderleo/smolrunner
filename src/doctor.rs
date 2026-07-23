@@ -1,5 +1,4 @@
 use std::env;
-use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -140,9 +139,8 @@ fn check_command(name: &str, required: bool) -> Check {
 }
 
 fn find_command(name: &str) -> Option<PathBuf> {
-    env::var_os("PATH")
-        .into_iter()
-        .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
+    let paths = env::var_os("PATH")?;
+    env::split_paths(&paths)
         .map(|directory| directory.join(name))
         .find(|candidate| is_executable_file(candidate))
 }
@@ -171,7 +169,7 @@ fn linux_pretty_name() -> Option<String> {
 
 fn trim_quotes(value: &str) -> &str {
     value
-        .strip_prefix(OsStr::new("\"").to_str().unwrap_or_default())
+        .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
         .unwrap_or(value)
 }
