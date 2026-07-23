@@ -26,30 +26,21 @@ jobs:
 
           resource = Path('src/resource.rs')
           text = resource.read_text()
-          old = '''        let evidence = runner_id.map_or_else(
-              || ResourceEvidence::fingerprint(fingerprint.clone()),
-              |id| ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
-          );'''
-          new = '''        let evidence = match runner_id {
+          start = text.index('        let evidence = runner_id.map_or_else(')
+          end = text.index('        Ok(Self::new(', start)
+          replacement = '''        let evidence = match runner_id {
               Some(id) => ResourceEvidence::both(format!("github-runner:{id}"), fingerprint),
               None => ResourceEvidence::fingerprint(fingerprint),
-          };'''
-          if old not in text:
-              raise SystemExit('resource replacement target not found')
-          resource.write_text(text.replace(old, new, 1))
+          };
+'''
+          resource.write_text(text[:start] + replacement + text[end:])
 
           ownership = Path('src/ownership.rs')
           text = ownership.read_text()
-          old = '''                    ResourceIdentity::github_runner_registration(scope, "project-vps", 42)
-                          .expect("registration");'''
-          new = '''                    ResourceIdentity::github_runner_registration(
-                          scope.clone(),
-                          "project-vps",
-                          42,
-                      )
-                      .expect("registration");'''
+          old = 'ResourceIdentity::github_runner_registration(scope, "project-vps", 42)'
+          new = 'ResourceIdentity::github_runner_registration(scope.clone(), "project-vps", 42)'
           if old not in text:
-              raise SystemExit('ownership replacement target not found')
+              raise SystemExit('ownership expression not found')
           ownership.write_text(text.replace(old, new, 1))
           PY
           cargo fmt --all
