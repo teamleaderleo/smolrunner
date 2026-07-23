@@ -8,6 +8,8 @@ use serde::Serialize;
 
 use crate::manifest::Manifest;
 
+pub const HOST_PLAN_SCHEMA_VERSION: u8 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
@@ -75,6 +77,7 @@ pub struct HostAction {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HostPlan {
+    pub schema_version: u8,
     pub desired: DesiredHostState,
     pub current: CurrentHostState,
     pub actions: Vec<HostAction>,
@@ -144,10 +147,34 @@ pub fn build_plan(manifest: &Manifest, current: CurrentHostState) -> HostPlan {
     );
 
     HostPlan {
+        schema_version: HOST_PLAN_SCHEMA_VERSION,
         desired,
         current,
         actions,
     }
+}
+
+#[must_use]
+pub fn render_human(plan: &HostPlan) -> String {
+    let mut output = format!(
+        "SmolRunner host plan\n\nRepository: {}\nRunner user: {}\n\n",
+        plan.desired.repository, plan.desired.runner_user
+    );
+
+    if plan.actions.is_empty() {
+        output.push_str("The inspected host state already matches the desired state.\n");
+    } else {
+        for action in &plan.actions {
+            let marker = match action.disposition {
+                HostActionDisposition::Required => "REQUIRED",
+                HostActionDisposition::NeedsInspection => "INSPECT",
+            };
+            output.push_str(&format!("[{marker}] {}\n", action.summary));
+        }
+    }
+
+    output.push_str("\nNo changes were made.\n");
+    output
 }
 
 fn push_for_presence(
@@ -184,6 +211,13 @@ pub struct LinuxFilesystemProbe;
 
 impl HostProbe for LinuxFilesystemProbe {
     fn inspect(&self, manifest: &Manifest) -> io::Result<CurrentHostState> {
+        if !cfg!(target_os = "linux") {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "host inspection currently supports Linux only",
+            ));
+        }
+
         let runner_user = &manifest.runner.user;
         let commands = ["git", "podman", "systemctl"]
             .into_iter()
@@ -250,7 +284,21 @@ fn find_command(name: &str) -> Option<PathBuf> {
         .into_iter()
         .flat_map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
         .map(|directory| directory.join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_executable_file(candidate))
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.metadata()
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 #[cfg(test)]
@@ -261,6 +309,7 @@ mod tests {
 
     use super::{
         CurrentHostState, HostActionDisposition, HostActionKind, Presence, build_plan,
+        render_human,
     };
 
     const MANIFEST: &str = r#"
@@ -303,7 +352,9 @@ trust:
             runner_registration: Presence::Present,
         };
 
-        assert!(build_plan(&manifest, current).actions.is_empty());
+        let plan = build_plan(&manifest, current);
+        assert!(plan.actions.is_empty());
+        assert!(render_human(&plan).contains("already matches"));
     }
 
     #[test]
