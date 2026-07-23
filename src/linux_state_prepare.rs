@@ -32,7 +32,7 @@ impl StatePreparationReceipt {
 /// # Errors
 ///
 /// Returns a bounded store error when the root or an existing directory is symlinked, has a
-/// different owner, has a mode other than `0750`, or cannot be created and synchronized.
+/// different owner or group, has a mode other than `0750`, or cannot be created and synchronized.
 pub fn prepare_default_installation(
     installation_id: &InstallationId,
 ) -> Result<StatePreparationReceipt, StateStoreError> {
@@ -48,7 +48,7 @@ pub fn prepare_default_installation(
 /// # Errors
 ///
 /// Returns a bounded store error when the root or an existing directory is symlinked, has a
-/// different owner, has a mode other than `0750`, or cannot be created and synchronized.
+/// different owner or group, has a mode other than `0750`, or cannot be created and synchronized.
 pub fn prepare_installation(
     root_path: impl AsRef<Path>,
     installation_id: &InstallationId,
@@ -56,14 +56,13 @@ pub fn prepare_installation(
     let root = fs::open(root_path.as_ref(), DIRECTORY_FLAGS, Mode::empty())
         .map_err(map_root_open_error)?;
     let root_stat = inspect_managed_directory(&root, "state root", None)?;
-    let owner_uid = root_stat.st_uid;
+    let owner = (root_stat.st_uid, root_stat.st_gid);
 
-    let (installations, installations_created) =
-        ensure_directory(&root, "installations", owner_uid)?;
+    let (installations, installations_created) = ensure_directory(&root, "installations", owner)?;
     let (installation, installation_created) =
-        ensure_directory(&installations, installation_id.as_str(), owner_uid)?;
-    let (_, resources_created) = ensure_directory(&installation, "resources", owner_uid)?;
-    let (_, journals_created) = ensure_directory(&installation, "journals", owner_uid)?;
+        ensure_directory(&installations, installation_id.as_str(), owner)?;
+    let (_, resources_created) = ensure_directory(&installation, "resources", owner)?;
+    let (_, journals_created) = ensure_directory(&installation, "journals", owner)?;
 
     Ok(StatePreparationReceipt {
         created_directories: [
@@ -81,14 +80,14 @@ pub fn prepare_installation(
 fn ensure_directory(
     parent: &OwnedFd,
     name: &str,
-    owner_uid: u32,
+    owner: (u32, u32),
 ) -> Result<(OwnedFd, bool), StateStoreError> {
     match fs::openat(parent, name, DIRECTORY_FLAGS, Mode::empty()) {
         Ok(directory) => {
-            inspect_managed_directory(&directory, "existing state directory", Some(owner_uid))?;
+            inspect_managed_directory(&directory, "existing state directory", Some(owner))?;
             Ok((directory, false))
         }
-        Err(Errno::NOENT) => create_directory(parent, name, owner_uid),
+        Err(Errno::NOENT) => create_directory(parent, name, owner),
         Err(error) => Err(map_directory_open_error(error)),
     }
 }
@@ -96,7 +95,7 @@ fn ensure_directory(
 fn create_directory(
     parent: &OwnedFd,
     name: &str,
-    owner_uid: u32,
+    owner: (u32, u32),
 ) -> Result<(OwnedFd, bool), StateStoreError> {
     match fs::mkdirat(parent, name, MANAGED_DIRECTORY_MODE) {
         Ok(()) => {
@@ -109,7 +108,7 @@ fn create_directory(
                     "could not set managed state-directory permissions",
                 )
             })?;
-            inspect_managed_directory(&directory, "new state directory", Some(owner_uid))?;
+            inspect_managed_directory(&directory, "new state directory", Some(owner))?;
             fs::fsync(parent).map_err(|_| {
                 StateStoreError::public(
                     StateStoreErrorKind::Io,
@@ -122,7 +121,7 @@ fn create_directory(
         Err(Errno::EXIST) => {
             let directory = fs::openat(parent, name, DIRECTORY_FLAGS, Mode::empty())
                 .map_err(map_directory_open_error)?;
-            inspect_managed_directory(&directory, "existing state directory", Some(owner_uid))?;
+            inspect_managed_directory(&directory, "existing state directory", Some(owner))?;
             Ok((directory, false))
         }
         Err(error) => Err(map_directory_create_error(error)),
@@ -132,7 +131,7 @@ fn create_directory(
 fn inspect_managed_directory(
     directory: &OwnedFd,
     subject: &str,
-    expected_uid: Option<u32>,
+    expected_owner: Option<(u32, u32)>,
 ) -> Result<rustix::fs::Stat, StateStoreError> {
     let stat = fs::fstat(directory).map_err(|_| {
         StateStoreError::public(
@@ -152,10 +151,10 @@ fn inspect_managed_directory(
             format!("{subject} does not have mode 0750"),
         ));
     }
-    if expected_uid.is_some_and(|uid| stat.st_uid != uid) {
+    if expected_owner.is_some_and(|(uid, gid)| stat.st_uid != uid || stat.st_gid != gid) {
         return Err(StateStoreError::public(
             StateStoreErrorKind::UnsafeFilesystem,
-            format!("{subject} has an unexpected owner"),
+            format!("{subject} has an unexpected owner or group"),
         ));
     }
     Ok(stat)
@@ -268,27 +267,28 @@ mod tests {
         InstallationId::parse("0123456789abcdef").expect("installation ID")
     }
 
-    fn assert_managed_directory(path: &Path, expected_uid: u32) {
+    fn assert_managed_directory(path: &Path, expected_owner: (u32, u32)) {
         let metadata = fs::metadata(path).expect("managed directory metadata");
         assert!(metadata.is_dir());
         assert_eq!(metadata.mode() & 0o7777, 0o750);
-        assert_eq!(metadata.uid(), expected_uid);
+        assert_eq!((metadata.uid(), metadata.gid()), expected_owner);
     }
 
     #[test]
     fn creates_the_fixed_installation_tree_with_restrictive_modes() {
         let root = TempRoot::new("create");
-        let root_uid = fs::metadata(root.path()).expect("root metadata").uid();
+        let root_metadata = fs::metadata(root.path()).expect("root metadata");
+        let root_owner = (root_metadata.uid(), root_metadata.gid());
         let receipt = prepare_installation(root.path(), &installation_id())
             .expect("prepare installation state");
         assert_eq!(receipt.created_directories(), 4);
 
         let installations = root.path().join("installations");
         let installation = installations.join(installation_id().as_str());
-        assert_managed_directory(&installations, root_uid);
-        assert_managed_directory(&installation, root_uid);
-        assert_managed_directory(&installation.join("resources"), root_uid);
-        assert_managed_directory(&installation.join("journals"), root_uid);
+        assert_managed_directory(&installations, root_owner);
+        assert_managed_directory(&installation, root_owner);
+        assert_managed_directory(&installation.join("resources"), root_owner);
+        assert_managed_directory(&installation.join("journals"), root_owner);
 
         let receipt = prepare_installation(root.path(), &installation_id())
             .expect("repeat installation preparation");
