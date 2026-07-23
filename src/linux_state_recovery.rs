@@ -130,19 +130,21 @@ pub fn inspect_orphans(
     installation_id: &InstallationId,
 ) -> Result<RecoveryReport, StateStoreError> {
     let root = open_directory_path(root_path.as_ref(), "state root")?;
-    let root_uid = inspect_directory(&root, "state root")?.st_uid;
+    let root_stat = inspect_directory(&root, "state root")?;
+    let root_owner = (root_stat.st_uid, root_stat.st_gid);
+    let root_uid = root_owner.0;
     let installations = open_directory_at(&root, "installations", "installations directory")?;
-    inspect_directory_owner(&installations, "installations directory", root_uid)?;
+    inspect_directory_owner(&installations, "installations directory", root_owner)?;
     let installation = open_directory_at(
         &installations,
         installation_id.as_str(),
         "installation directory",
     )?;
-    inspect_directory_owner(&installation, "installation directory", root_uid)?;
+    inspect_directory_owner(&installation, "installation directory", root_owner)?;
     let resources = open_directory_at(&installation, "resources", "resources directory")?;
-    inspect_directory_owner(&resources, "resources directory", root_uid)?;
+    inspect_directory_owner(&resources, "resources directory", root_owner)?;
     let journals = open_directory_at(&installation, "journals", "journals directory")?;
-    inspect_directory_owner(&journals, "journals directory", root_uid)?;
+    inspect_directory_owner(&journals, "journals directory", root_owner)?;
 
     let mut findings = Vec::new();
     let mut truncated = false;
@@ -363,15 +365,15 @@ fn inspect_directory(
 fn inspect_directory_owner(
     directory: &OwnedFd,
     subject: &str,
-    expected_uid: u32,
+    expected_owner: (u32, u32),
 ) -> Result<(), StateStoreError> {
     let stat = inspect_directory(directory, subject)?;
-    if stat.st_uid == expected_uid {
+    if (stat.st_uid, stat.st_gid) == expected_owner {
         Ok(())
     } else {
         Err(StateStoreError::public(
             StateStoreErrorKind::UnsafeFilesystem,
-            format!("{subject} has an unexpected owner"),
+            format!("{subject} has an unexpected owner or group"),
         ))
     }
 }
@@ -408,9 +410,12 @@ mod tests {
 
     use crate::linux_state_prepare::prepare_installation;
     use crate::state::InstallationId;
-    use crate::state_store::MAX_STATE_DOCUMENT_BYTES;
+    use crate::state_store::{MAX_STATE_DOCUMENT_BYTES, StateStoreErrorKind};
 
-    use super::{RecoveryArea, RecoveryConcern, RecoveryDisposition, inspect_orphans};
+    use super::{
+        RecoveryArea, RecoveryConcern, RecoveryDisposition, inspect_directory,
+        inspect_directory_owner, inspect_orphans, open_directory_path,
+    };
 
     static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
     const VALID_NAME: &str = ".smolrunner-tmp-0123456789abcdef0123456789abcdef";
@@ -543,5 +548,19 @@ mod tests {
                 .concerns()
                 .contains(&RecoveryConcern::MalformedTemporaryName)
         );
+    }
+
+    #[test]
+    fn mismatched_directory_group_is_rejected() {
+        let root = TempRoot::new("group-mismatch");
+        let directory = open_directory_path(root.path(), "state root").expect("open root");
+        let stat = inspect_directory(&directory, "state root").expect("inspect root");
+        let error = inspect_directory_owner(
+            &directory,
+            "state root",
+            (stat.st_uid, stat.st_gid ^ 1),
+        )
+        .expect_err("different group must fail");
+        assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
     }
 }
