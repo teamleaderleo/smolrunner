@@ -393,6 +393,7 @@ fn canonical_absolute_path(field: &str, value: &str) -> Result<String, LaneComma
 mod tests {
     use crate::journal::{ExecutionLane, PlannedMutation, Preconditions, RollbackClass};
     use crate::process::CommandValue;
+    use crate::process::CommandValue;
 
     use super::{
         APT_GET, GIT, GROUPADD, LOGINCTL, LaneCommand, LaneCommandKind, LinuxAccountName, NOLOGIN,
@@ -537,6 +538,8 @@ mod tests {
         LinuxAccountName::parse("root/user").expect_err("unsafe account must fail");
         RunnerUserContext::new(account("project-runner"), 0, 1001, "/srv/runner")
             .expect_err("root runner user must fail");
+        RunnerUserContext::new(account("project-runner"), 1001, 0, "/srv/runner")
+            .expect_err("root primary group must fail");
         RunnerUserContext::new(account("project-runner"), 1001, 0, "/srv/runner")
             .expect_err("root primary group must fail");
         RunnerUserContext::new(account("project-runner"), 1001, 1001, "/srv/../root")
