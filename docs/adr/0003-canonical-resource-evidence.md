@@ -91,6 +91,7 @@ These values describe expected evidence durability, not permission to mutate aft
 - Desired identities cannot be constructed from a mutable tag, display name, path basename, or runner label alone.
 - Untrusted markers with missing evidence can be classified as unknown instead of being rejected as absent.
 - Evidence that is present but malformed fails validation before ownership classification.
+- Complete and partial validation share the same kind-specific canonical parser; partial validation permits absence, never alternate formats.
 - Live probes must execute only in the lanes listed above.
 - State persistence and lane execution remain blocked by issues #11 and #12.
 
