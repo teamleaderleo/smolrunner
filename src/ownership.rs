@@ -242,7 +242,7 @@ fn classify_marked(
         );
     }
 
-    if marker.resource.evidence.is_empty() && desired.evidence.is_empty() {
+    if marker.resource.evidence.is_empty() {
         return OwnershipAssessment::new(
             OwnershipClass::Unknown,
             "a marker without immutable resource evidence cannot establish managed ownership",
@@ -515,11 +515,11 @@ mod tests {
     #[test]
     fn marker_without_immutable_evidence_is_not_managed() {
         let context = context();
-        let desired = runner(None);
+        let desired = runner(Some("runner-id-42"));
         let marker = OwnershipMarker::new(
             context.installation_id.clone(),
             context.project.clone(),
-            desired.clone(),
+            runner(None),
         );
         let observed = ObservedResource {
             identity: desired.clone(),
@@ -576,9 +576,9 @@ mod tests {
     #[test]
     fn names_without_evidence_remain_unknown() {
         let context = context();
-        let desired = runner(None);
+        let desired = runner(Some("runner-id-42"));
         let observed = ObservedResource {
-            identity: desired.clone(),
+            identity: runner(None),
             marker: None,
         };
 
