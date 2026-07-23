@@ -13,7 +13,7 @@ jobs:
       github.event.issue.pull_request &&
       github.event.issue.number == 14 &&
       github.event.comment.body == '/apply-canonical-fix' &&
-      github.event.comment.author_association == 'OWNER'
+      github.event.comment.user.login == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
