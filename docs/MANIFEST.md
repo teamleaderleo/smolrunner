@@ -1,0 +1,96 @@
+# Manifest reference
+
+`smolrunner.yml` describes the host and execution boundary SmolRunner should reconcile for one project. It is deliberately not a pipeline language: dependency installation, test commands, build logic, and GitHub workflow triggers remain in the project repository.
+
+## Versioning
+
+The top-level `version` field is required. The current and only accepted value is `1`.
+
+Unknown fields and unknown versions fail closed. Future releases may add a migration command, but they must not silently reinterpret an older or newer document.
+
+## Fields
+
+### `repository`
+
+The GitHub repository in exact `OWNER/REPOSITORY` form.
+
+### `runner`
+
+- `scope`: `repository` or `organization`.
+- `user`: dedicated Linux service account, at most 32 characters, using lowercase letters, digits, `_`, and `-`.
+- `labels`: one or more project-specific GitHub Actions runner labels. Duplicate labels are rejected.
+
+Organization scope targets the owner component of `repository`. Repository selection and runner-group restrictions will be added with GitHub integration; the v1 plan only records the intended scope.
+
+### `container`
+
+- `image`: local image reference SmolRunner should build or inspect.
+- `file`: project-relative Containerfile path. Absolute paths and parent traversal are rejected.
+
+The repository owns the Containerfile. SmolRunner should record the resulting immutable image digest rather than trusting a mutable tag alone.
+
+### `verify`
+
+- `command`: project-relative verification entry point.
+- `suites`: stable names mapped to one command argument each.
+
+SmolRunner does not interpret npm, Maven, Python, Convex, Blender, or other project-specific concepts. It invokes the repository-owned entry point inside the disposable execution boundary.
+
+### `limits`
+
+- `memory`: positive integer followed by `KiB`, `MiB`, or `GiB`.
+- `cpus`: finite value greater than zero and at most 128.
+- `pids`: positive process limit.
+
+These values are desired policy. The current `plan` command does not apply them.
+
+### `trust`
+
+Version one intentionally accepts only:
+
+```yaml
+trust:
+  forks: deny
+  trigger: operator
+```
+
+Broader policies require an explicit threat-model change. Public-fork execution and automatic persistent-runner PR execution are not implicit configuration options.
+
+## Example
+
+```yaml
+version: 1
+repository: example/project
+
+runner:
+  scope: repository
+  user: project-runner
+  labels:
+    - project-ci
+
+container:
+  image: localhost/project-ci:1
+  file: build/ci/Containerfile
+
+verify:
+  command: scripts/run-vps-verification.sh
+  suites:
+    focused: focused
+    full: full
+
+limits:
+  memory: 2GiB
+  cpus: 1.5
+  pids: 768
+
+trust:
+  forks: deny
+  trigger: operator
+```
+
+Validate it without changing the host:
+
+```bash
+smolrunner plan --file smolrunner.yml
+smolrunner --output json plan --file smolrunner.yml
+```
