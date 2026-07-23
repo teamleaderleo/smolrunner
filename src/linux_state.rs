@@ -20,9 +20,7 @@ const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
 const FILE_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC);
-const EXISTING_LOCK_FLAGS: OFlags = OFlags::RDWR
-    .union(OFlags::NOFOLLOW)
-    .union(OFlags::CLOEXEC);
+const EXISTING_LOCK_FLAGS: OFlags = OFlags::RDWR.union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC);
 const NEW_LOCK_FLAGS: OFlags = EXISTING_LOCK_FLAGS
     .union(OFlags::CREATE)
     .union(OFlags::EXCL);
@@ -133,13 +131,8 @@ impl LinuxStateRoot {
         })?;
         write_and_sync(temporary, record.bytes())?;
 
-        fs::renameat(
-            &parent,
-            temporary_path.name(),
-            &parent,
-            file_name.as_str(),
-        )
-        .map_err(map_rename_error)?;
+        fs::renameat(&parent, temporary_path.name(), &parent, file_name.as_str())
+            .map_err(map_rename_error)?;
         temporary_path.disarm();
 
         fs::fsync(&parent).map_err(|_| {
@@ -163,13 +156,8 @@ impl LinuxStateRoot {
             StateStoreError::public(StateStoreErrorKind::Io, "could not duplicate state root")
         })?;
         for component in parents {
-            current = fs::openat(
-                &current,
-                component.as_str(),
-                DIRECTORY_FLAGS,
-                Mode::empty(),
-            )
-            .map_err(map_required_parent_error)?;
+            current = fs::openat(&current, component.as_str(), DIRECTORY_FLAGS, Mode::empty())
+                .map_err(map_required_parent_error)?;
             verify_directory(&current, "state path parent")?;
         }
         Ok((current, file_name))
@@ -366,7 +354,10 @@ fn random_temporary_name() -> Result<String, StateStoreError> {
 fn write_and_sync(fd: OwnedFd, bytes: &[u8]) -> Result<(), StateStoreError> {
     let mut file = File::from(fd);
     file.write_all(bytes).map_err(|_| {
-        StateStoreError::public(StateStoreErrorKind::Io, "could not write temporary state file")
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "could not write temporary state file",
+        )
     })?;
     fs::fsync(&file).map_err(|_| {
         StateStoreError::public(
@@ -751,7 +742,10 @@ mod tests {
             .write_atomic(&record)
             .expect_err("destination symlink must fail");
         assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
-        assert_eq!(fs::read(&outside_file).expect("read foreign file"), b"foreign");
+        assert_eq!(
+            fs::read(&outside_file).expect("read foreign file"),
+            b"foreign"
+        );
     }
 
     #[test]
@@ -765,8 +759,7 @@ mod tests {
             .create_new(true)
             .open(&lock_path)
             .expect("create lock file");
-        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o600))
-            .expect("set lock mode");
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o600)).expect("set lock mode");
         rustix_fs::flock(&lock, FlockOperation::LockExclusive).expect("hold lock");
 
         let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
