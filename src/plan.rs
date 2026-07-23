@@ -35,10 +35,10 @@ pub enum PlanActionKind {
 pub fn build(manifest: &Manifest, source: &Path) -> PlanReport {
     let scope_target = match manifest.runner.scope {
         RunnerScope::Repository => manifest.repository.clone(),
-        RunnerScope::Organization => manifest
-            .repository
-            .split_once('/')
-            .map_or_else(|| manifest.repository.clone(), |(owner, _)| owner.to_owned()),
+        RunnerScope::Organization => manifest.repository.split_once('/').map_or_else(
+            || manifest.repository.clone(),
+            |(owner, _)| owner.to_owned(),
+        ),
     };
     let labels = manifest.runner.labels.join(", ");
     let suites = manifest
