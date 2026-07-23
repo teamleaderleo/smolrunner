@@ -300,6 +300,19 @@ impl LaneCommand {
         &self.spec
     }
 
+    #[must_use]
+    pub fn required_programs(&self) -> Vec<&Path> {
+        let outer = self.spec.program.as_path();
+        match self.kind {
+            LaneCommandKind::RunnerPodmanInfo => vec![outer, Path::new(PODMAN)],
+            LaneCommandKind::RunnerGitVersion => vec![outer, Path::new(GIT)],
+            LaneCommandKind::AptInstall
+            | LaneCommandKind::EnsureSystemGroup
+            | LaneCommandKind::EnsureSystemUser
+            | LaneCommandKind::EnableLinger => vec![outer],
+        }
+    }
+
     fn new(action: &PlannedMutation, kind: LaneCommandKind, spec: CommandSpec) -> Self {
         Self {
             action_id: action.id.clone(),
