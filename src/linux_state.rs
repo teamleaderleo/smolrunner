@@ -1,14 +1,16 @@
 use std::fs::File;
-use std::io::{Read, Take};
+use std::io::{Read, Take, Write as _};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
-use rustix::fs::{self, FileType, Mode, OFlags};
+use rustix::fs::{self, AtFlags, FileType, FlockOperation, Mode, OFlags};
 use rustix::io::Errno;
+use rustix::rand::{GetRandomFlags, getrandom};
 
-use crate::state::{STATE_ROOT, StatePath};
+use crate::state::{STATE_ROOT, StateComponent, StatePath};
 use crate::state_store::{
-    MAX_STATE_DOCUMENT_BYTES, StateRead, StateStoreError, StateStoreErrorKind,
+    MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStore, StateStoreError,
+    StateStoreErrorKind, StateWriteDisposition, StateWriteReceipt,
 };
 
 const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
@@ -18,8 +20,23 @@ const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
 const FILE_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC);
+const EXISTING_LOCK_FLAGS: OFlags = OFlags::RDWR
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
+const NEW_LOCK_FLAGS: OFlags = EXISTING_LOCK_FLAGS
+    .union(OFlags::CREATE)
+    .union(OFlags::EXCL);
+const TEMP_FILE_FLAGS: OFlags = OFlags::WRONLY
+    .union(OFlags::CREATE)
+    .union(OFlags::EXCL)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);
+const PRIVATE_FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR);
+const LOCK_FILE_NAME: &str = "write.lock";
+const TEMP_FILE_ATTEMPTS: usize = 8;
+const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";
 
-/// Read-only descriptor-relative access to one trusted SmolRunner state root.
+/// Descriptor-relative access to one trusted SmolRunner state root.
 #[derive(Debug)]
 pub struct LinuxStateRoot {
     root: OwnedFd,
@@ -36,7 +53,7 @@ impl LinuxStateRoot {
         Self::open(STATE_ROOT)
     }
 
-    /// Open one trusted state root for descriptor-relative reads.
+    /// Open one trusted state root for descriptor-relative access.
     ///
     /// This constructor is public so integration tests and explicitly configured hosts can use a
     /// temporary or relocated root. Callers remain responsible for choosing the trusted root path.
@@ -60,10 +77,7 @@ impl LinuxStateRoot {
     /// `CorruptState` for oversized files; and `Io` for other bounded read failures.
     pub fn read(&self, path: &StatePath) -> Result<StateRead, StateStoreError> {
         let Some((file_name, parents)) = path.components().split_last() else {
-            return Err(StateStoreError::public(
-                StateStoreErrorKind::CorruptState,
-                "state path contains no file component",
-            ));
+            return Err(empty_state_path_error());
         };
 
         let mut current = None::<OwnedFd>;
@@ -85,8 +99,162 @@ impl LinuxStateRoot {
             Err(Errno::NOENT) => return Ok(StateRead::Missing),
             Err(error) => return Err(map_component_open_error(error)),
         };
-        verify_regular_file(&file)?;
+        verify_regular_file(&file, "state file", true)?;
         read_bounded(file)
+    }
+
+    /// Atomically publish one validated state record inside an already-prepared state tree.
+    ///
+    /// The installation and destination parent directories must already exist. Writers are
+    /// serialized through a persistent installation-local lock file. Publication writes a random
+    /// exclusive temporary file, sets mode `0600`, synchronizes the file, renames it within the
+    /// destination directory, and synchronizes that directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Busy` when another SmolRunner writer holds the installation lock,
+    /// `UnsafeFilesystem` for symlinked or incompatible state objects, and `Io` for bounded
+    /// creation, write, synchronization, or rename failures.
+    pub fn write_atomic(
+        &mut self,
+        record: &StateRecord,
+    ) -> Result<StateWriteReceipt, StateStoreError> {
+        let _lock = self.acquire_installation_lock(record.path())?;
+        let (parent, file_name) = self.open_required_parent(record.path())?;
+        let disposition = inspect_destination(&parent, file_name)?;
+        let (temporary, temporary_name) = create_temporary_file(&parent)?;
+        let mut temporary_path = TemporaryPath::new(parent.as_fd(), temporary_name);
+
+        fs::fchmod(&temporary, PRIVATE_FILE_MODE).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "could not set private state-file permissions",
+            )
+        })?;
+        write_and_sync(temporary, record.bytes())?;
+
+        fs::renameat(
+            &parent,
+            temporary_path.name(),
+            &parent,
+            file_name.as_str(),
+        )
+        .map_err(map_rename_error)?;
+        temporary_path.disarm();
+
+        fs::fsync(&parent).map_err(|_| {
+            StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "state file was published but its parent directory could not be synchronized",
+            )
+        })?;
+
+        Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
+    }
+
+    fn open_required_parent<'a>(
+        &self,
+        path: &'a StatePath,
+    ) -> Result<(OwnedFd, &'a StateComponent), StateStoreError> {
+        let Some((file_name, parents)) = path.components().split_last() else {
+            return Err(empty_state_path_error());
+        };
+        let mut current = self.root.try_clone().map_err(|_| {
+            StateStoreError::public(StateStoreErrorKind::Io, "could not duplicate state root")
+        })?;
+        for component in parents {
+            current = fs::openat(
+                &current,
+                component.as_str(),
+                DIRECTORY_FLAGS,
+                Mode::empty(),
+            )
+            .map_err(map_required_parent_error)?;
+            verify_directory(&current, "state path parent")?;
+        }
+        Ok((current, file_name))
+    }
+
+    fn acquire_installation_lock(&self, path: &StatePath) -> Result<OwnedFd, StateStoreError> {
+        let components = path.components();
+        if components.len() < 3 || components[0].as_str() != "installations" {
+            return Err(StateStoreError::public(
+                StateStoreErrorKind::CorruptState,
+                "state path does not identify one installation",
+            ));
+        }
+
+        let installations = fs::openat(
+            &self.root,
+            components[0].as_str(),
+            DIRECTORY_FLAGS,
+            Mode::empty(),
+        )
+        .map_err(map_required_parent_error)?;
+        verify_directory(&installations, "installations directory")?;
+        let installation = fs::openat(
+            &installations,
+            components[1].as_str(),
+            DIRECTORY_FLAGS,
+            Mode::empty(),
+        )
+        .map_err(map_required_parent_error)?;
+        verify_directory(&installation, "installation directory")?;
+
+        let lock = open_installation_lock(&installation)?;
+        match fs::flock(&lock, FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => Ok(lock),
+            Err(Errno::AGAIN) => Err(StateStoreError::public(
+                StateStoreErrorKind::Busy,
+                "another state writer holds the installation lock",
+            )),
+            Err(_) => Err(StateStoreError::public(
+                StateStoreErrorKind::Io,
+                "could not acquire the installation lock",
+            )),
+        }
+    }
+}
+
+impl StateStore for LinuxStateRoot {
+    fn read(&self, path: &StatePath) -> Result<StateRead, StateStoreError> {
+        Self::read(self, path)
+    }
+
+    fn write_atomic(&mut self, record: &StateRecord) -> Result<StateWriteReceipt, StateStoreError> {
+        Self::write_atomic(self, record)
+    }
+}
+
+struct TemporaryPath<'a> {
+    parent: BorrowedFd<'a>,
+    name: String,
+    armed: bool,
+}
+
+impl<'a> TemporaryPath<'a> {
+    fn new(parent: BorrowedFd<'a>, name: String) -> Self {
+        Self {
+            parent,
+            name,
+            armed: true,
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TemporaryPath<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::unlinkat(self.parent, &self.name, AtFlags::empty());
+        }
     }
 }
 
@@ -95,6 +263,117 @@ fn active_directory<'a>(root: &'a OwnedFd, current: Option<&'a OwnedFd>) -> Borr
         Some(directory) => directory.as_fd(),
         None => root.as_fd(),
     }
+}
+
+fn open_installation_lock(installation: &OwnedFd) -> Result<OwnedFd, StateStoreError> {
+    match fs::openat(
+        installation,
+        LOCK_FILE_NAME,
+        NEW_LOCK_FLAGS,
+        PRIVATE_FILE_MODE,
+    ) {
+        Ok(lock) => {
+            fs::fchmod(&lock, PRIVATE_FILE_MODE).map_err(|_| {
+                StateStoreError::public(
+                    StateStoreErrorKind::Io,
+                    "could not set installation-lock permissions",
+                )
+            })?;
+            Ok(lock)
+        }
+        Err(Errno::EXIST) => {
+            let lock = fs::openat(
+                installation,
+                LOCK_FILE_NAME,
+                EXISTING_LOCK_FLAGS,
+                Mode::empty(),
+            )
+            .map_err(map_lock_open_error)?;
+            verify_regular_file(&lock, "installation lock", false)?;
+            verify_private_mode(&lock, "installation lock")?;
+            Ok(lock)
+        }
+        Err(error) => Err(map_lock_open_error(error)),
+    }
+}
+
+fn inspect_destination(
+    parent: &OwnedFd,
+    file_name: &StateComponent,
+) -> Result<StateWriteDisposition, StateStoreError> {
+    match fs::openat(parent, file_name.as_str(), FILE_FLAGS, Mode::empty()) {
+        Ok(file) => {
+            verify_regular_file(&file, "existing state file", true)?;
+            verify_private_mode(&file, "existing state file")?;
+            Ok(StateWriteDisposition::Replaced)
+        }
+        Err(Errno::NOENT) => Ok(StateWriteDisposition::Created),
+        Err(error) => Err(map_component_open_error(error)),
+    }
+}
+
+fn create_temporary_file(parent: &OwnedFd) -> Result<(OwnedFd, String), StateStoreError> {
+    for _ in 0..TEMP_FILE_ATTEMPTS {
+        let name = random_temporary_name()?;
+        match fs::openat(parent, &name, TEMP_FILE_FLAGS, PRIVATE_FILE_MODE) {
+            Ok(file) => return Ok((file, name)),
+            Err(Errno::EXIST) => {}
+            Err(Errno::LOOP | Errno::NOTDIR) => {
+                return Err(StateStoreError::public(
+                    StateStoreErrorKind::UnsafeFilesystem,
+                    "temporary state path is symlinked or invalid",
+                ));
+            }
+            Err(_) => {
+                return Err(StateStoreError::public(
+                    StateStoreErrorKind::Io,
+                    "could not create temporary state file",
+                ));
+            }
+        }
+    }
+    Err(StateStoreError::public(
+        StateStoreErrorKind::Io,
+        "could not allocate a unique temporary state file",
+    ))
+}
+
+fn random_temporary_name() -> Result<String, StateStoreError> {
+    let mut random = [0_u8; 16];
+    let filled = getrandom(&mut random[..], GetRandomFlags::empty()).map_err(|_| {
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "could not obtain operating-system randomness for a temporary state file",
+        )
+    })?;
+    if filled.len() != random.len() {
+        return Err(StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "operating-system randomness returned an incomplete temporary-file name",
+        ));
+    }
+
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut name = String::with_capacity(TEMP_FILE_PREFIX.len() + random.len() * 2);
+    name.push_str(TEMP_FILE_PREFIX);
+    for byte in random {
+        name.push(HEX[(byte >> 4) as usize] as char);
+        name.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(name)
+}
+
+fn write_and_sync(fd: OwnedFd, bytes: &[u8]) -> Result<(), StateStoreError> {
+    let mut file = File::from(fd);
+    file.write_all(bytes).map_err(|_| {
+        StateStoreError::public(StateStoreErrorKind::Io, "could not write temporary state file")
+    })?;
+    fs::fsync(&file).map_err(|_| {
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "could not synchronize temporary state file",
+        )
+    })
 }
 
 fn verify_directory(fd: &OwnedFd, subject: &str) -> Result<(), StateStoreError> {
@@ -114,23 +393,49 @@ fn verify_directory(fd: &OwnedFd, subject: &str) -> Result<(), StateStoreError> 
     }
 }
 
-fn verify_regular_file(fd: &OwnedFd) -> Result<(), StateStoreError> {
+fn verify_regular_file(
+    fd: &OwnedFd,
+    subject: &str,
+    enforce_size_limit: bool,
+) -> Result<(), StateStoreError> {
     let stat = fs::fstat(fd).map_err(|_| {
-        StateStoreError::public(StateStoreErrorKind::Io, "could not inspect state file")
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            format!("could not inspect {subject}"),
+        )
     })?;
     if !FileType::from_raw_mode(stat.st_mode).is_file() {
         return Err(StateStoreError::public(
             StateStoreErrorKind::UnsafeFilesystem,
-            "state path does not identify a regular file",
+            format!("{subject} is not a regular file"),
         ));
     }
-    if stat.st_size < 0 || stat.st_size as u64 > MAX_STATE_DOCUMENT_BYTES as u64 {
+    if enforce_size_limit
+        && (stat.st_size < 0 || stat.st_size as u64 > MAX_STATE_DOCUMENT_BYTES as u64)
+    {
         return Err(StateStoreError::public(
             StateStoreErrorKind::CorruptState,
-            "state file exceeds the configured size limit",
+            format!("{subject} exceeds the configured size limit"),
         ));
     }
     Ok(())
+}
+
+fn verify_private_mode(fd: &OwnedFd, subject: &str) -> Result<(), StateStoreError> {
+    let stat = fs::fstat(fd).map_err(|_| {
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            format!("could not inspect {subject} permissions"),
+        )
+    })?;
+    if stat.st_mode & 0o7777 == 0o600 {
+        Ok(())
+    } else {
+        Err(StateStoreError::public(
+            StateStoreErrorKind::UnsafeFilesystem,
+            format!("{subject} does not have mode 0600"),
+        ))
+    }
 }
 
 fn read_bounded(fd: OwnedFd) -> Result<StateRead, StateStoreError> {
@@ -147,6 +452,13 @@ fn read_bounded(fd: OwnedFd) -> Result<StateRead, StateStoreError> {
         ));
     }
     Ok(StateRead::Present(bytes))
+}
+
+fn empty_state_path_error() -> StateStoreError {
+    StateStoreError::public(
+        StateStoreErrorKind::CorruptState,
+        "state path contains no file component",
+    )
 }
 
 fn map_root_open_error(error: Errno) -> StateStoreError {
@@ -172,17 +484,62 @@ fn map_component_open_error(error: Errno) -> StateStoreError {
     }
 }
 
+fn map_required_parent_error(error: Errno) -> StateStoreError {
+    match error {
+        Errno::LOOP | Errno::NOTDIR => StateStoreError::public(
+            StateStoreErrorKind::UnsafeFilesystem,
+            "state path contains a symlink or non-directory parent",
+        ),
+        Errno::NOENT => StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "state path parent has not been prepared",
+        ),
+        _ => StateStoreError::public(StateStoreErrorKind::Io, "could not open state path parent"),
+    }
+}
+
+fn map_lock_open_error(error: Errno) -> StateStoreError {
+    match error {
+        Errno::LOOP | Errno::NOTDIR => StateStoreError::public(
+            StateStoreErrorKind::UnsafeFilesystem,
+            "installation lock is symlinked or invalid",
+        ),
+        _ => StateStoreError::public(StateStoreErrorKind::Io, "could not open installation lock"),
+    }
+}
+
+fn map_rename_error(error: Errno) -> StateStoreError {
+    match error {
+        Errno::ISDIR | Errno::NOTDIR | Errno::LOOP => StateStoreError::public(
+            StateStoreErrorKind::UnsafeFilesystem,
+            "state destination changed to an incompatible filesystem object",
+        ),
+        _ => StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "could not publish temporary state file",
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::os::unix::fs::symlink;
+    use std::fs::{self, OpenOptions};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::state::{InstallationId, StateLayout};
-    use crate::state_store::{MAX_STATE_DOCUMENT_BYTES, StateRead, StateStoreErrorKind};
+    use rustix::fs::{self as rustix_fs, FlockOperation};
 
-    use super::LinuxStateRoot;
+    use crate::manifest::RunnerScope;
+    use crate::ownership::ProjectIdentity;
+    use crate::state::{InstallationId, StateLayout};
+    use crate::state_document::ProjectStateDocument;
+    use crate::state_store::{
+        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
+        StateWriteDisposition,
+    };
+
+    use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};
 
     static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -220,6 +577,21 @@ mod tests {
         let installation = root.join("installations").join(installation_id().as_str());
         fs::create_dir_all(&installation).expect("create project parent");
         installation
+    }
+
+    fn project_record(repository: &str) -> StateRecord {
+        StateRecord::project(
+            ProjectStateDocument::new(
+                installation_id(),
+                ProjectIdentity {
+                    repository: repository.to_owned(),
+                    runner_scope: RunnerScope::Repository,
+                    runner_user: "project-runner".to_owned(),
+                },
+            )
+            .expect("project document"),
+        )
+        .expect("project record")
     }
 
     #[test]
@@ -319,5 +691,108 @@ mod tests {
             .read(&StateLayout::project_document(&installation_id()))
             .expect_err("oversized state must fail");
         assert_eq!(error.kind(), StateStoreErrorKind::CorruptState);
+    }
+
+    #[test]
+    fn atomic_write_creates_and_replaces_private_state() {
+        let root = TempTree::new("atomic-write");
+        let parent = create_project_parent(root.path());
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let first = project_record("example/project");
+        let receipt = store.write_atomic(&first).expect("create state");
+        assert_eq!(receipt.disposition(), StateWriteDisposition::Created);
+        assert_eq!(receipt.bytes_written(), first.bytes().len());
+        assert_eq!(
+            fs::metadata(parent.join("project.json"))
+                .expect("state metadata")
+                .mode()
+                & 0o7777,
+            0o600
+        );
+        assert_eq!(
+            store.read(first.path()).expect("read created state"),
+            StateRead::Present(first.bytes().to_vec())
+        );
+
+        let second = project_record("example/renamed");
+        let receipt = store.write_atomic(&second).expect("replace state");
+        assert_eq!(receipt.disposition(), StateWriteDisposition::Replaced);
+        assert_eq!(
+            store.read(second.path()).expect("read replaced state"),
+            StateRead::Present(second.bytes().to_vec())
+        );
+        assert!(
+            fs::read_dir(parent)
+                .expect("list state directory")
+                .all(|entry| !entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(TEMP_FILE_PREFIX))
+        );
+    }
+
+    #[test]
+    fn write_requires_prepared_parents_and_rejects_destination_symlink() {
+        let root = TempTree::new("write-boundaries");
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let record = project_record("example/project");
+        let error = store
+            .write_atomic(&record)
+            .expect_err("missing parent must fail");
+        assert_eq!(error.kind(), StateStoreErrorKind::Io);
+
+        let outside = TempTree::new("write-boundaries-outside");
+        let outside_file = outside.path().join("foreign.json");
+        fs::write(&outside_file, b"foreign").expect("write foreign file");
+        let parent = create_project_parent(root.path());
+        symlink(&outside_file, parent.join("project.json")).expect("create destination symlink");
+        let error = store
+            .write_atomic(&record)
+            .expect_err("destination symlink must fail");
+        assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
+        assert_eq!(fs::read(&outside_file).expect("read foreign file"), b"foreign");
+    }
+
+    #[test]
+    fn held_installation_lock_returns_busy() {
+        let root = TempTree::new("write-lock");
+        let parent = create_project_parent(root.path());
+        let lock_path = parent.join(LOCK_FILE_NAME);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .expect("create lock file");
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o600))
+            .expect("set lock mode");
+        rustix_fs::flock(&lock, FlockOperation::LockExclusive).expect("hold lock");
+
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let error = store
+            .write_atomic(&project_record("example/project"))
+            .expect_err("concurrent writer must be busy");
+        assert_eq!(error.kind(), StateStoreErrorKind::Busy);
+    }
+
+    #[test]
+    fn incompatible_existing_lock_is_rejected_without_chmod() {
+        let root = TempTree::new("unsafe-lock");
+        let parent = create_project_parent(root.path());
+        let lock_path = parent.join(LOCK_FILE_NAME);
+        fs::write(&lock_path, b"foreign lock").expect("write foreign lock");
+        fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o644))
+            .expect("set foreign lock mode");
+
+        let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+        let error = store
+            .write_atomic(&project_record("example/project"))
+            .expect_err("broad lock mode must fail");
+        assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
+        assert_eq!(
+            fs::metadata(lock_path).expect("lock metadata").mode() & 0o7777,
+            0o644
+        );
     }
 }
