@@ -41,3 +41,8 @@ jobs:
           cargo run --quiet -- plan --file examples/quarry.yml
           cargo run --quiet -- --output json plan --file examples/glossless.yml \
             | jq -e '.schema_version == 1 and (.actions | length == 4)'
+
+      - name: Exercise read-only host planning
+        run: |
+          cargo run --quiet -- --output json host plan --file examples/quarry.yml \
+            | jq -e '.schema_version == 1 and (.actions | length >= 2)'
