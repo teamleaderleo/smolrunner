@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt;
 
 use serde::Serialize;
 
@@ -155,16 +156,39 @@ impl ExecutionJournal {
     }
 }
 
-/// Execute a validated sequence and retain enough public state to explain partial failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlanValidationError {
+    pub problems: Vec<String>,
+}
+
+impl fmt::Display for PlanValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(formatter, "mutation plan validation failed")?;
+        for problem in &self.problems {
+            writeln!(formatter, "- {problem}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for PlanValidationError {}
+
+/// Execute a sequence and retain enough public state to explain partial failure.
 ///
 /// The executor contract accepts only public receipts and public failures. Secret-bearing process
 /// details must be handled and redacted below this layer.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns a validation error before calling the executor when action identities or precondition
+/// evidence are invalid.
 pub fn execute_plan(
     actions: Vec<PlannedMutation>,
     executor: &mut impl MutationExecutor,
     allow_irreversible: bool,
-) -> ExecutionJournal {
+) -> Result<ExecutionJournal, PlanValidationError> {
+    validate_plan(&actions).map_err(|problems| PlanValidationError { problems })?;
+
     let mut journal = ExecutionJournal {
         schema_version: JOURNAL_SCHEMA_VERSION,
         records: actions
@@ -188,7 +212,7 @@ pub fn execute_plan(
             journal.records[index].message =
                 Some("irreversible action requires explicit confirmation".to_owned());
             journal.stopped_after = Some(journal.records[index].action.id.clone());
-            return journal;
+            return Ok(journal);
         }
     }
 
@@ -211,7 +235,7 @@ pub fn execute_plan(
         }
     }
 
-    journal
+    Ok(journal)
 }
 
 fn rollback_completed(
@@ -294,6 +318,7 @@ mod tests {
         executions: Vec<String>,
         rollbacks: Vec<String>,
         receipts: BTreeMap<String, String>,
+        private_secret: String,
     }
 
     impl MutationExecutor for FakeExecutor {
@@ -302,6 +327,7 @@ mod tests {
             action: &PlannedMutation,
         ) -> Result<ActionReceipt, ActionFailure> {
             self.executions.push(action.id.clone());
+            let _secret_was_available_below_the_journal = !self.private_secret.is_empty();
             if self.fail_execute.contains(&action.id) {
                 Err(ActionFailure::public("execute_failed", "bounded failure"))
             } else {
@@ -351,7 +377,8 @@ mod tests {
             ],
             &mut executor,
             false,
-        );
+        )
+        .expect("valid plan");
 
         assert!(journal.completed());
         assert_eq!(executor.executions, ["one", "two"]);
@@ -373,7 +400,8 @@ mod tests {
             ],
             &mut executor,
             false,
-        );
+        )
+        .expect("valid plan");
 
         assert_eq!(executor.rollbacks, ["two", "one"]);
         assert_eq!(journal.records[0].outcome, ActionOutcome::RolledBack);
@@ -396,7 +424,8 @@ mod tests {
             ],
             &mut executor,
             false,
-        );
+        )
+        .expect("valid plan");
 
         assert_eq!(journal.records[0].outcome, ActionOutcome::RollbackFailed);
         assert_eq!(journal.records[1].outcome, ActionOutcome::Failed);
@@ -413,7 +442,8 @@ mod tests {
             ],
             &mut executor,
             false,
-        );
+        )
+        .expect("valid plan");
 
         assert_eq!(journal.records[0].outcome, ActionOutcome::Pending);
         assert_eq!(journal.records[1].outcome, ActionOutcome::Skipped);
@@ -425,17 +455,32 @@ mod tests {
     fn journal_serialization_contains_only_public_messages() {
         let mut executor = FakeExecutor {
             receipts: BTreeMap::from([("one".to_owned(), "public result".to_owned())]),
+            private_secret: "registration-token".to_owned(),
             ..FakeExecutor::default()
         };
         let journal = execute_plan(
             vec![action("one", RollbackClass::Reversible)],
             &mut executor,
             false,
-        );
+        )
+        .expect("valid plan");
         let json = serde_json::to_string(&journal).expect("serialize journal");
 
         assert!(json.contains("public result"));
         assert!(!json.contains("registration-token"));
+    }
+
+    #[test]
+    fn invalid_plan_never_reaches_the_executor() {
+        let invalid = vec![
+            action("duplicate", RollbackClass::Reversible),
+            action("duplicate", RollbackClass::Reversible),
+        ];
+        let mut executor = FakeExecutor::default();
+        let error = execute_plan(invalid, &mut executor, false).expect_err("invalid plan");
+
+        assert!(error.problems.iter().any(|problem| problem.contains("duplicate")));
+        assert!(executor.executions.is_empty());
     }
 
     #[test]
