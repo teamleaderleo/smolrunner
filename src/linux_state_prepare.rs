@@ -58,8 +58,7 @@ pub fn prepare_installation(
     let root_stat = inspect_managed_directory(&root, "state root", None)?;
     let owner = (root_stat.st_uid, root_stat.st_gid);
 
-    let (installations, installations_created) =
-        ensure_directory(&root, "installations", owner)?;
+    let (installations, installations_created) = ensure_directory(&root, "installations", owner)?;
     let (installation, installation_created) =
         ensure_directory(&installations, installation_id.as_str(), owner)?;
     let (_, resources_created) = ensure_directory(&installation, "resources", owner)?;
