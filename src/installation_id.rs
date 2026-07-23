@@ -83,8 +83,14 @@ mod tests {
     fn deterministic_encoding_is_lowercase_fixed_length_hex() {
         let random = [0xab_u8; INSTALLATION_RANDOM_BYTES];
         let installation_id = encode_installation_id(&random).expect("encode installation ID");
-        assert_eq!(installation_id.as_str(), "ab".repeat(INSTALLATION_RANDOM_BYTES));
-        assert_eq!(installation_id.as_str().len(), INSTALLATION_RANDOM_BYTES * 2);
+        assert_eq!(
+            installation_id.as_str(),
+            "ab".repeat(INSTALLATION_RANDOM_BYTES)
+        );
+        assert_eq!(
+            installation_id.as_str().len(),
+            INSTALLATION_RANDOM_BYTES * 2
+        );
     }
 
     #[test]
@@ -92,10 +98,16 @@ mod tests {
         let mut generated = BTreeSet::new();
         for _ in 0..16 {
             let installation_id = generate_installation_id().expect("generate installation ID");
-            assert_eq!(installation_id.as_str().len(), INSTALLATION_RANDOM_BYTES * 2);
-            assert!(installation_id.as_str().bytes().all(|byte| {
-                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-            }));
+            assert_eq!(
+                installation_id.as_str().len(),
+                INSTALLATION_RANDOM_BYTES * 2
+            );
+            assert!(
+                installation_id
+                    .as_str()
+                    .bytes()
+                    .all(|byte| { byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) })
+            );
             assert!(generated.insert(installation_id.as_str().to_owned()));
         }
     }
