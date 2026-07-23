@@ -555,12 +555,9 @@ mod tests {
         let root = TempRoot::new("group-mismatch");
         let directory = open_directory_path(root.path(), "state root").expect("open root");
         let stat = inspect_directory(&directory, "state root").expect("inspect root");
-        let error = inspect_directory_owner(
-            &directory,
-            "state root",
-            (stat.st_uid, stat.st_gid ^ 1),
-        )
-        .expect_err("different group must fail");
+        let unexpected_owner = (stat.st_uid, stat.st_gid ^ 1);
+        let error = inspect_directory_owner(&directory, "state root", unexpected_owner)
+            .expect_err("different group must fail");
         assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
     }
 }
