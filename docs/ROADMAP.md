@@ -20,7 +20,7 @@ SmolRunner should remain useful while it is still small. The roadmap favors a de
 - [x] ADR for privilege separation, adoption, token handling, and rollback semantics.
 - [x] Pure ownership identity and managed/adoptable/foreign/conflicting/unknown classification.
 - [x] ADR for `/var/lib/smolrunner`, marker identity, and name-safe adoption policy.
-- [ ] Canonical locators and immutable evidence for each real resource kind.
+- [x] Canonical locators, immutable evidence, observation lanes, and survival policy for each resource kind.
 - [ ] Atomic ownership and journal persistence with crash recovery.
 - [ ] Root and runner-user lane implementations.
 - [ ] Debian and Ubuntu host preparation.
