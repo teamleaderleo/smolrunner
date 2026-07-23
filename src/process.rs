@@ -106,11 +106,7 @@ impl CommandSpec {
     }
 
     #[must_use]
-    pub fn secret_environment(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    pub fn secret_environment(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.environment
             .insert(key.into(), CommandValue::Secret(SecretString::new(value)));
         self
@@ -191,9 +187,9 @@ fn ensure_absolute_program(program: &Path) -> io::Result<()> {
 }
 
 fn redact(value: &str, secrets: &[&str]) -> String {
-    secrets
-        .iter()
-        .fold(value.to_owned(), |output, secret| output.replace(secret, REDACTED))
+    secrets.iter().fold(value.to_owned(), |output, secret| {
+        output.replace(secret, REDACTED)
+    })
 }
 
 #[cfg(test)]
