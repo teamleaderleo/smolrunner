@@ -477,7 +477,7 @@ mod tests {
         external_id.map_or_else(
             || {
                 let mut identity =
-                    ResourceIdentity::github_runner_registration(scope, "project-vps", 42)
+                    ResourceIdentity::github_runner_registration(scope.clone(), "project-vps", 42)
                         .expect("registration");
                 identity.evidence = super::ResourceEvidence::none();
                 identity
