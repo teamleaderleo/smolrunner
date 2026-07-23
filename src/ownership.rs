@@ -242,10 +242,10 @@ fn classify_marked(
         );
     }
 
-    if marker.resource.evidence.is_empty() {
+    if !crate::resource::validate_identity(&marker.resource).is_empty() {
         return OwnershipAssessment::new(
             OwnershipClass::Unknown,
-            "a marker without immutable resource evidence cannot establish managed ownership",
+            "the ownership marker lacks complete immutable resource evidence",
         );
     }
 
@@ -520,6 +520,30 @@ mod tests {
             context.installation_id.clone(),
             context.project.clone(),
             runner(None),
+        );
+        let observed = ObservedResource {
+            identity: desired.clone(),
+            marker: Some(marker),
+        };
+
+        assert_eq!(
+            classify(&context, &desired, &observed)
+                .expect("valid ownership")
+                .class,
+            OwnershipClass::Unknown
+        );
+    }
+
+    #[test]
+    fn marker_with_partial_immutable_evidence_is_not_managed() {
+        let context = context();
+        let desired = runner(Some("runner-id-42"));
+        let mut marker_identity = desired.clone();
+        marker_identity.evidence.fingerprint = None;
+        let marker = OwnershipMarker::new(
+            context.installation_id.clone(),
+            context.project.clone(),
+            marker_identity,
         );
         let observed = ObservedResource {
             identity: desired.clone(),
