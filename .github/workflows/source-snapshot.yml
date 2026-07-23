@@ -1,8 +1,7 @@
 name: Source snapshot
 
 on:
-  push:
-    branches: [feature/canonical-resource-evidence]
+  pull_request:
 
 permissions:
   contents: read
