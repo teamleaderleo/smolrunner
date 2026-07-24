@@ -13,7 +13,7 @@ pub mod linux_installation_catalog;
 /// Nonblocking coordination for installation-catalog discovery and creation.
 #[cfg(target_os = "linux")]
 pub mod linux_installation_catalog_lock;
-/// Locked create-or-load orchestration for local project installations.
+/// Locked, race-free create-or-load orchestration for local project installations.
 #[cfg(target_os = "linux")]
 pub mod linux_installation_enrollment;
 /// Staged, durable, no-replace publication of complete project installations.
