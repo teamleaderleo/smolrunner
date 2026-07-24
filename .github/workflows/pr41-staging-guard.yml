@@ -28,50 +28,39 @@ jobs:
 
           path = Path("src/linux_installation_publication.rs")
           text = path.read_text(encoding="utf-8")
-          old = '''        Ok(()) => {
-              let directory = fs::openat(
-                  staging,
-                  installation_id.as_str(),
-                  DIRECTORY_FLAGS,
-                  Mode::empty(),
-              )
-              .map_err(map_directory_open_error)?;
-              set_directory_mode(&directory)?;
-              inspect_directory(directory.as_fd(), "staged installation directory", owner)?;
-              synchronize_borrowed_directory(staging, "installation staging directory")?;
-              Ok(StagedInstallation {
-                  parent: staging,
-                  directory,
-                  name: installation_id.as_str().to_owned(),
-                  armed: true,
-              })
-          }
-          '''
-          new = '''        Ok(()) => {
-              let name = installation_id.as_str().to_owned();
-              let mut guard = CreatedDirectory::new(staging, name.clone());
-              let directory = fs::openat(
-                  staging,
-                  installation_id.as_str(),
-                  DIRECTORY_FLAGS,
-                  Mode::empty(),
-              )
-              .map_err(map_directory_open_error)?;
-              set_directory_mode(&directory)?;
-              inspect_directory(directory.as_fd(), "staged installation directory", owner)?;
-              synchronize_borrowed_directory(staging, "installation staging directory")?;
-              guard.disarm();
-              Ok(StagedInstallation {
-                  parent: staging,
-                  directory,
-                  name,
-                  armed: true,
-              })
-          }
-          '''
-          if text.count(old) != 1:
-              raise SystemExit("expected exactly one staged-installation creation block")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+          start = text.index("fn create_staged_installation")
+          end = text.index("\nfn create_empty_directory", start)
+          block = text[start:end]
+
+          first_old = """        Ok(()) => {
+                      let directory = fs::openat(
+          """
+          first_new = """        Ok(()) => {
+                      let name = installation_id.as_str().to_owned();
+                      let mut guard = CreatedDirectory::new(staging, name.clone());
+                      let directory = fs::openat(
+          """
+          second_old = """            synchronize_borrowed_directory(staging, "installation staging directory")?;
+                      Ok(StagedInstallation {
+          """
+          second_new = """            synchronize_borrowed_directory(staging, "installation staging directory")?;
+                      guard.disarm();
+                      Ok(StagedInstallation {
+          """
+          third_old = "                name: installation_id.as_str().to_owned(),"
+          third_new = "                name,"
+
+          if block.count(first_old) != 1:
+              raise SystemExit("expected one staged mkdir opening")
+          if block.count(second_old) != 1:
+              raise SystemExit("expected one staged synchronization point")
+          if block.count(third_old) != 1:
+              raise SystemExit("expected one staged name field")
+
+          block = block.replace(first_old, first_new, 1)
+          block = block.replace(second_old, second_new, 1)
+          block = block.replace(third_old, third_new, 1)
+          path.write_text(text[:start] + block + text[end:], encoding="utf-8")
           PY
           rustfmt --edition 2024 src/linux_installation_publication.rs
           test "$(git diff --name-only)" = "src/linux_installation_publication.rs"
