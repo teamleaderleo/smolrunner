@@ -32,8 +32,8 @@ jobs:
           path = Path("src/linux_state.rs")
           text = path.read_text(encoding="utf-8")
 
-          constants_marker = 'const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";\n'
-          fault_types = '''
+          marker = 'const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";\n'
+          addition = '''
 
           #[derive(Debug, Clone, Copy, PartialEq, Eq)]
           enum WriteFailurePoint {
@@ -55,15 +55,13 @@ jobs:
               }
           }
           '''
-          if text.count(constants_marker) != 1:
-              raise SystemExit("expected one temporary-file prefix constant")
-          if "enum WriteFailurePoint" in text:
-              raise SystemExit("fault injection types already exist")
-          text = text.replace(constants_marker, constants_marker + fault_types, 1)
+          if text.count(marker) != 1 or "enum WriteFailurePoint" in text:
+              raise SystemExit("unexpected fault-type insertion state")
+          text = text.replace(marker, marker + addition, 1)
 
-          write_start = text.index("    pub fn write_atomic(\n")
-          write_end = text.index("    fn open_required_parent", write_start)
-          write_method = '''    pub fn write_atomic(
+          start = text.index("    pub fn write_atomic(\n")
+          end = text.index("    fn open_required_parent", start)
+          replacement = '''    pub fn write_atomic(
               &mut self,
               record: &StateRecord,
           ) -> Result<StateWriteReceipt, StateStoreError> {
@@ -107,11 +105,11 @@ jobs:
           }
 
           '''
-          text = text[:write_start] + write_method + text[write_end:]
+          text = text[:start] + replacement + text[end:]
 
-          sync_start = text.index("fn write_and_sync(")
-          sync_end = text.index("\nfn verify_directory", sync_start)
-          sync_function = '''fn write_and_sync(
+          start = text.index("fn write_and_sync(")
+          end = text.index("\nfn verify_directory", start)
+          replacement = '''fn write_and_sync(
               fd: OwnedFd,
               bytes: &[u8],
               faults: &mut dyn WriteFaultInjector,
@@ -133,29 +131,31 @@ jobs:
               })
           }
           '''
-          text = text[:sync_start] + sync_function + text[sync_end:]
+          text = text[:start] + replacement + text[end:]
 
-          import_old = "    use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};"
-          import_new = '''    use super::{
+          old = '''    use crate::state_store::{
+              MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
+              StateWriteDisposition,
+          };'''
+          new = '''    use crate::state_store::{
+              MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreError,
+              StateStoreErrorKind, StateWriteDisposition,
+          };'''
+          if text.count(old) != 1:
+              raise SystemExit("unexpected state-store test import")
+          text = text.replace(old, new, 1)
+
+          old = "    use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};"
+          new = '''    use super::{
               LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX, WriteFailurePoint,
               WriteFaultInjector,
           };'''
-          if text.count(import_old) != 1:
-              raise SystemExit("expected one linux-state test import")
-          text = text.replace(import_old, import_new, 1)
-
-          store_import_old = '''        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
-              StateWriteDisposition,
-          };'''
-          store_import_new = '''        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreError,
-              StateStoreErrorKind, StateWriteDisposition,
-          };'''
-          if text.count(store_import_old) != 1:
-              raise SystemExit("expected one state-store test import")
-          text = text.replace(store_import_old, store_import_new, 1)
+          if text.count(old) != 1:
+              raise SystemExit("unexpected linux-state test import")
+          text = text.replace(old, new, 1)
 
           first_test = text.index("    #[test]\n    fn reads_regular_file_through_canonical_components()")
-          test_support = '''    struct FailAt(WriteFailurePoint);
+          support = '''    struct FailAt(WriteFailurePoint);
 
           impl WriteFaultInjector for FailAt {
               fn check(&mut self, point: WriteFailurePoint) -> Result<(), StateStoreError> {
@@ -193,12 +193,12 @@ jobs:
           }
 
           '''
-          text = text[:first_test] + test_support + text[first_test:]
+          text = text[:first_test] + support + text[first_test:]
 
-          boundary_test = text.index(
+          boundary = text.index(
               "    #[test]\n    fn write_requires_prepared_parents_and_rejects_destination_symlink()"
           )
-          fault_tests = '''    #[test]
+          tests = '''    #[test]
           fn prepublication_failures_preserve_existing_state_and_remove_temporary_files() {
               for point in [
                   WriteFailurePoint::BeforeWrite,
@@ -249,8 +249,7 @@ jobs:
           }
 
           '''
-          text = text[:boundary_test] + fault_tests + text[boundary_test:]
-
+          text = text[:boundary] + tests + text[boundary:]
           path.write_text(text, encoding="utf-8")
           PY
           rustfmt --edition 2024 src/linux_state.rs
