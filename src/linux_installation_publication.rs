@@ -207,6 +207,8 @@ fn create_staged_installation<'a>(
 ) -> Result<StagedInstallation<'a>, InstallationPublicationError> {
     match fs::mkdirat(staging, installation_id.as_str(), MANAGED_DIRECTORY_MODE) {
         Ok(()) => {
+            let name = installation_id.as_str().to_owned();
+            let mut guard = CreatedDirectory::new(staging, name.clone());
             let directory = fs::openat(
                 staging,
                 installation_id.as_str(),
@@ -217,10 +219,11 @@ fn create_staged_installation<'a>(
             set_directory_mode(&directory)?;
             inspect_directory(directory.as_fd(), "staged installation directory", owner)?;
             synchronize_borrowed_directory(staging, "installation staging directory")?;
+            guard.disarm();
             Ok(StagedInstallation {
                 parent: staging,
                 directory,
-                name: installation_id.as_str().to_owned(),
+                name,
                 armed: true,
             })
         }
