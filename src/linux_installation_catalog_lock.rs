@@ -88,6 +88,12 @@ fn finish_new_lock(
         )
     })?;
     inspect_lock(&lock, owner)?;
+    fs::fsync(&lock).map_err(|_| {
+        StateStoreError::public(
+            StateStoreErrorKind::Io,
+            "could not synchronize the installation-catalog lock",
+        )
+    })?;
     fs::fsync(root).map_err(|_| {
         StateStoreError::public(
             StateStoreErrorKind::Io,
@@ -202,7 +208,7 @@ fn map_root_open_error(error: Errno) -> StateStoreError {
 
 fn map_lock_open_error(error: Errno) -> StateStoreError {
     match error {
-        Errno::LOOP | Errno::NOTDIR => StateStoreError::public(
+        Errno::ISDIR | Errno::LOOP | Errno::NOTDIR => StateStoreError::public(
             StateStoreErrorKind::UnsafeFilesystem,
             "installation-catalog lock is symlinked or invalid",
         ),
@@ -280,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn symlinked_or_broad_lock_is_rejected() {
+    fn symlinked_broad_or_directory_lock_is_rejected() {
         let root = TempRoot::new("unsafe");
         let outside = TempRoot::new("outside");
         let lock_path = root.path().join(LOCK_FILE_NAME);
@@ -293,6 +299,11 @@ mod tests {
         fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o644))
             .expect("set broad catalog-lock mode");
         let error = lock_installation_catalog(root.path()).expect_err("broad mode must fail");
+        assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
+        fs::remove_file(&lock_path).expect("remove broad catalog lock");
+
+        fs::create_dir(&lock_path).expect("create catalog-lock directory");
+        let error = lock_installation_catalog(root.path()).expect_err("directory must fail");
         assert_eq!(error.kind(), StateStoreErrorKind::UnsafeFilesystem);
     }
 
