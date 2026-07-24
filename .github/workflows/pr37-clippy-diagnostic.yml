@@ -1,0 +1,42 @@
+name: PR 37 Clippy Diagnostic
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pr37-clippy-diagnostic.yml
+      - src/lib.rs
+      - src/linux_installation_catalog.rs
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Capture Clippy output
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --locked --all-targets --all-features -- -D warnings > clippy.log 2>&1
+          printf '%s\n' "$?" > clippy.status
+          exit 0
+
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr37-clippy
+          path: |
+            clippy.log
+            clippy.status
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Preserve Clippy result
+        shell: bash
+        run: exit "$(cat clippy.status)"
