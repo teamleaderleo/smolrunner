@@ -1,11 +1,12 @@
 use std::fs::File;
 use std::io::{Read, Take};
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
 use rustix::fs::{self, Dir, FileType, Mode, OFlags};
 use rustix::io::Errno;
 
+use crate::linux_installation_catalog_lock::InstallationCatalogLock;
 use crate::ownership::ProjectIdentity;
 use crate::state::{InstallationId, STATE_ROOT};
 use crate::state_document::{ProjectStateDocument, StateDocument, decode_state_document};
@@ -60,12 +61,47 @@ pub fn find_installation(
     project: &ProjectIdentity,
 ) -> Result<InstallationLookup, StateStoreError> {
     let root = open_root(root_path.as_ref())?;
-    let root_stat = inspect_directory(&root, "state root", None)?;
-    let owner = (root_stat.st_uid, root_stat.st_gid);
-    let Some(installations) = open_installations(&root)? else {
+    let root_stat = inspect_directory(root.as_fd(), "state root", None)?;
+    find_in_open_root(
+        root.as_fd(),
+        (root_stat.st_uid, root_stat.st_gid),
+        project,
+    )
+}
+
+/// Find the unique installation for a project beneath the exact root held by a catalog lock.
+///
+/// This form is intended for create-or-load operations that must keep one root descriptor and one
+/// exclusive catalog lock across lookup and publication.
+///
+/// # Errors
+///
+/// Returns a bounded error for unsafe, malformed, incomplete, or duplicate catalog state.
+pub fn find_locked_installation(
+    catalog_lock: &InstallationCatalogLock,
+    project: &ProjectIdentity,
+) -> Result<InstallationLookup, StateStoreError> {
+    inspect_directory(
+        catalog_lock.root(),
+        "state root",
+        Some(catalog_lock.owner()),
+    )?;
+    find_in_open_root(catalog_lock.root(), catalog_lock.owner(), project)
+}
+
+fn find_in_open_root(
+    root: BorrowedFd<'_>,
+    owner: (u32, u32),
+    project: &ProjectIdentity,
+) -> Result<InstallationLookup, StateStoreError> {
+    let Some(installations) = open_installations(root)? else {
         return Ok(InstallationLookup::Missing);
     };
-    inspect_directory(&installations, "installations directory", Some(owner))?;
+    inspect_directory(
+        installations.as_fd(),
+        "installations directory",
+        Some(owner),
+    )?;
 
     let mut entries = Dir::read_from(&installations)
         .map_err(|_| io_error("could not enumerate the installation catalog"))?;
@@ -84,7 +120,7 @@ pub fn find_installation(
 
         let id = parse_installation_id(name)?;
         let directory = open_installation(&installations, &id)?;
-        inspect_directory(&directory, "installation directory", Some(owner))?;
+        inspect_directory(directory.as_fd(), "installation directory", Some(owner))?;
         let document = read_project(&directory, owner)?;
         if document.installation_id() != &id {
             return Err(corrupt_error("project state ID differs from its directory"));
@@ -115,7 +151,7 @@ fn open_root(path: &Path) -> Result<OwnedFd, StateStoreError> {
     })
 }
 
-fn open_installations(root: &OwnedFd) -> Result<Option<OwnedFd>, StateStoreError> {
+fn open_installations(root: BorrowedFd<'_>) -> Result<Option<OwnedFd>, StateStoreError> {
     match fs::openat(root, "installations", DIRECTORY_FLAGS, Mode::empty()) {
         Ok(directory) => Ok(Some(directory)),
         Err(Errno::NOENT) => Ok(None),
@@ -140,7 +176,7 @@ fn open_installation(
 }
 
 fn inspect_directory(
-    directory: &OwnedFd,
+    directory: BorrowedFd<'_>,
     subject: &str,
     expected_owner: Option<(u32, u32)>,
 ) -> Result<rustix::fs::Stat, StateStoreError> {
@@ -237,6 +273,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use crate::linux_installation_catalog_lock::lock_installation_catalog;
     use crate::linux_state::LinuxStateRoot;
     use crate::linux_state_prepare::prepare_installation;
     use crate::manifest::RunnerScope;
@@ -245,7 +282,9 @@ mod tests {
     use crate::state_document::ProjectStateDocument;
     use crate::state_store::{StateRecord, StateStoreErrorKind};
 
-    use super::{InstallationLookup, PROJECT_FILE, find_installation};
+    use super::{
+        InstallationLookup, PROJECT_FILE, find_installation, find_locked_installation,
+    };
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -318,6 +357,19 @@ mod tests {
         write_project(root.path(), expected.clone(), project("example/project"));
         let actual = find_installation(root.path(), &project("example/project"));
         assert_eq!(actual.expect("lookup"), InstallationLookup::Found(expected));
+    }
+
+    #[test]
+    fn locked_lookup_uses_the_catalog_locks_open_root() {
+        let root = TempRoot::new("locked");
+        let expected = id("2323232323232323");
+        let target = project("example/project");
+        write_project(root.path(), expected.clone(), target.clone());
+        let lock = lock_installation_catalog(root.path()).expect("lock catalog");
+        assert_eq!(
+            find_locked_installation(&lock, &target).expect("locked lookup"),
+            InstallationLookup::Found(expected)
+        );
     }
 
     #[test]
