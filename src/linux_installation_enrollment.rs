@@ -150,9 +150,7 @@ fn map_store_error(error: StateStoreError) -> InstallationEnrollmentError {
     let kind = match error.kind() {
         StateStoreErrorKind::Busy => InstallationEnrollmentErrorKind::Busy,
         StateStoreErrorKind::Io => InstallationEnrollmentErrorKind::Io,
-        StateStoreErrorKind::UnsafeFilesystem => {
-            InstallationEnrollmentErrorKind::UnsafeFilesystem
-        }
+        StateStoreErrorKind::UnsafeFilesystem => InstallationEnrollmentErrorKind::UnsafeFilesystem,
         StateStoreErrorKind::CorruptState => InstallationEnrollmentErrorKind::CorruptState,
     };
     InstallationEnrollmentError::new(kind, error.message())
@@ -232,15 +230,15 @@ mod tests {
     fn first_enrollment_creates_and_second_loads_the_same_installation() {
         let root = TempRoot::new("create-load");
         let target = project("example/project");
-        let created = create_or_load_installation(root.path(), target.clone())
-            .expect("create installation");
+        let created =
+            create_or_load_installation(root.path(), target.clone()).expect("create installation");
         assert_eq!(
             created.disposition(),
             InstallationEnrollmentDisposition::Created
         );
 
-        let existing = create_or_load_installation(root.path(), target.clone())
-            .expect("load installation");
+        let existing =
+            create_or_load_installation(root.path(), target.clone()).expect("load installation");
         assert_eq!(
             existing.disposition(),
             InstallationEnrollmentDisposition::Existing
@@ -281,7 +279,10 @@ mod tests {
         };
         let error = create_or_load_installation(root.path(), invalid)
             .expect_err("invalid project must fail");
-        assert_eq!(error.kind(), InstallationEnrollmentErrorKind::InvalidProject);
+        assert_eq!(
+            error.kind(),
+            InstallationEnrollmentErrorKind::InvalidProject
+        );
         assert!(!root.path().join("installations").exists());
     }
 }

@@ -62,11 +62,7 @@ pub fn find_installation(
 ) -> Result<InstallationLookup, StateStoreError> {
     let root = open_root(root_path.as_ref())?;
     let root_stat = inspect_directory(root.as_fd(), "state root", None)?;
-    find_in_open_root(
-        root.as_fd(),
-        (root_stat.st_uid, root_stat.st_gid),
-        project,
-    )
+    find_in_open_root(root.as_fd(), (root_stat.st_uid, root_stat.st_gid), project)
 }
 
 /// Find the unique installation for a project beneath the exact root held by a catalog lock.
@@ -282,9 +278,7 @@ mod tests {
     use crate::state_document::ProjectStateDocument;
     use crate::state_store::{StateRecord, StateStoreErrorKind};
 
-    use super::{
-        InstallationLookup, PROJECT_FILE, find_installation, find_locked_installation,
-    };
+    use super::{InstallationLookup, PROJECT_FILE, find_installation, find_locked_installation};
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 
