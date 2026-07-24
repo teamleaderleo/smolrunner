@@ -1,0 +1,88 @@
+name: PR 41 staging guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact PR branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feature/atomic-installation-publication
+          fetch-depth: 1
+
+      - name: Arm cleanup immediately after staging mkdir
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/linux_installation_publication.rs")
+          text = path.read_text(encoding="utf-8")
+          old = '''        Ok(()) => {
+              let directory = fs::openat(
+                  staging,
+                  installation_id.as_str(),
+                  DIRECTORY_FLAGS,
+                  Mode::empty(),
+              )
+              .map_err(map_directory_open_error)?;
+              set_directory_mode(&directory)?;
+              inspect_directory(directory.as_fd(), "staged installation directory", owner)?;
+              synchronize_borrowed_directory(staging, "installation staging directory")?;
+              Ok(StagedInstallation {
+                  parent: staging,
+                  directory,
+                  name: installation_id.as_str().to_owned(),
+                  armed: true,
+              })
+          }
+          '''
+          new = '''        Ok(()) => {
+              let name = installation_id.as_str().to_owned();
+              let mut guard = CreatedDirectory::new(staging, name.clone());
+              let directory = fs::openat(
+                  staging,
+                  installation_id.as_str(),
+                  DIRECTORY_FLAGS,
+                  Mode::empty(),
+              )
+              .map_err(map_directory_open_error)?;
+              set_directory_mode(&directory)?;
+              inspect_directory(directory.as_fd(), "staged installation directory", owner)?;
+              synchronize_borrowed_directory(staging, "installation staging directory")?;
+              guard.disarm();
+              Ok(StagedInstallation {
+                  parent: staging,
+                  directory,
+                  name,
+                  armed: true,
+              })
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one staged-installation creation block")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          rustfmt --edition 2024 src/linux_installation_publication.rs
+          test "$(git diff --name-only)" = "src/linux_installation_publication.rs"
+          git diff --check
+
+      - name: Commit the bounded correction
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/linux_installation_publication.rs
+          git commit -m 'fix: guard staged installation creation'
+          git push origin HEAD:feature/atomic-installation-publication
