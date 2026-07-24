@@ -1,4 +1,4 @@
-name: Atomic state failure phases
+name: Atomic state failure phase tests
 
 on:
   push:
