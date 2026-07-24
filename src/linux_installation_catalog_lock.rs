@@ -22,7 +22,19 @@ const LOCK_FILE_NAME: &str = "catalog.lock";
 /// Held nonblocking lock for installation-catalog discovery and creation.
 #[derive(Debug)]
 pub struct InstallationCatalogLock {
+    root: OwnedFd,
+    owner: (u32, u32),
     _lock: OwnedFd,
+}
+
+impl InstallationCatalogLock {
+    pub(crate) fn root(&self) -> BorrowedFd<'_> {
+        self.root.as_fd()
+    }
+
+    pub(crate) const fn owner(&self) -> (u32, u32) {
+        self.owner
+    }
 }
 
 /// Acquire the installation-catalog lock beneath the canonical system state root.
@@ -38,8 +50,9 @@ pub fn lock_default_installation_catalog() -> Result<InstallationCatalogLock, St
 /// Acquire the installation-catalog lock beneath one existing trusted state root.
 ///
 /// The lock file is persistent, empty, mode `0600`, and owned by the same UID and GID as the
-/// restrictive `0750` state root. Dropping the returned guard releases the advisory lock without
-/// deleting the file.
+/// restrictive `0750` state root. The returned guard retains the exact opened root descriptor, so
+/// follow-on catalog operations cannot be redirected by replacing the root path. Dropping the guard
+/// releases the advisory lock without deleting the file.
 ///
 /// # Errors
 ///
@@ -55,7 +68,11 @@ pub fn lock_installation_catalog(
     let lock = open_catalog_lock(&root, owner)?;
 
     match fs::flock(&lock, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => Ok(InstallationCatalogLock { _lock: lock }),
+        Ok(()) => Ok(InstallationCatalogLock {
+            root,
+            owner,
+            _lock: lock,
+        }),
         Err(Errno::AGAIN) => Err(StateStoreError::public(
             StateStoreErrorKind::Busy,
             "another installation-catalog operation holds the lock",
