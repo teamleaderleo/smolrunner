@@ -13,7 +13,7 @@ pub mod linux_installation_catalog;
 /// Nonblocking coordination for installation-catalog discovery and creation.
 #[cfg(target_os = "linux")]
 pub mod linux_installation_catalog_lock;
-/// Staged, durable, no-replace publication of complete project installations.
+/// Staged, durable publication of complete project installations without replacement.
 #[cfg(target_os = "linux")]
 pub mod linux_installation_publication;
 #[cfg(target_os = "linux")]
