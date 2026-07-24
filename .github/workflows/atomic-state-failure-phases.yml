@@ -1,0 +1,268 @@
+name: Atomic state failure phases
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the exact test branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: test/atomic-state-failure-phases
+          fetch-depth: 1
+
+      - name: Add deterministic atomic-write fault tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f src/linux_state.rs
+          test ! -L src/linux_state.rs
+          test -z "$(git status --porcelain)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/linux_state.rs")
+          text = path.read_text(encoding="utf-8")
+
+          constants_marker = 'const TEMP_FILE_PREFIX: &str = ".smolrunner-tmp-";\n'
+          fault_types = '''
+
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          enum WriteFailurePoint {
+              BeforeWrite,
+              BeforeFileSync,
+              BeforeRename,
+              BeforeParentSync,
+          }
+
+          trait WriteFaultInjector {
+              fn check(&mut self, point: WriteFailurePoint) -> Result<(), StateStoreError>;
+          }
+
+          struct NoWriteFaults;
+
+          impl WriteFaultInjector for NoWriteFaults {
+              fn check(&mut self, _point: WriteFailurePoint) -> Result<(), StateStoreError> {
+                  Ok(())
+              }
+          }
+          '''
+          if text.count(constants_marker) != 1:
+              raise SystemExit("expected one temporary-file prefix constant")
+          if "enum WriteFailurePoint" in text:
+              raise SystemExit("fault injection types already exist")
+          text = text.replace(constants_marker, constants_marker + fault_types, 1)
+
+          write_start = text.index("    pub fn write_atomic(\n")
+          write_end = text.index("    fn open_required_parent", write_start)
+          write_method = '''    pub fn write_atomic(
+              &mut self,
+              record: &StateRecord,
+          ) -> Result<StateWriteReceipt, StateStoreError> {
+              let mut faults = NoWriteFaults;
+              self.write_atomic_with_faults(record, &mut faults)
+          }
+
+          fn write_atomic_with_faults(
+              &mut self,
+              record: &StateRecord,
+              faults: &mut dyn WriteFaultInjector,
+          ) -> Result<StateWriteReceipt, StateStoreError> {
+              let _lock = self.acquire_installation_lock(record.path())?;
+              let (parent, file_name) = self.open_required_parent(record.path())?;
+              let disposition = inspect_destination(&parent, file_name)?;
+              let (temporary, temporary_name) = create_temporary_file(&parent)?;
+              let mut temporary_path = TemporaryPath::new(parent.as_fd(), temporary_name);
+
+              fs::fchmod(&temporary, PRIVATE_FILE_MODE).map_err(|_| {
+                  StateStoreError::public(
+                      StateStoreErrorKind::Io,
+                      "could not set private state-file permissions",
+                  )
+              })?;
+              write_and_sync(temporary, record.bytes(), faults)?;
+
+              faults.check(WriteFailurePoint::BeforeRename)?;
+              fs::renameat(&parent, temporary_path.name(), &parent, file_name.as_str())
+                  .map_err(map_rename_error)?;
+              temporary_path.disarm();
+
+              faults.check(WriteFailurePoint::BeforeParentSync)?;
+              fs::fsync(&parent).map_err(|_| {
+                  StateStoreError::public(
+                      StateStoreErrorKind::Io,
+                      "state file was published but its parent directory could not be synchronized",
+                  )
+              })?;
+
+              Ok(StateWriteReceipt::new(disposition, record.bytes().len()))
+          }
+
+          '''
+          text = text[:write_start] + write_method + text[write_end:]
+
+          sync_start = text.index("fn write_and_sync(")
+          sync_end = text.index("\nfn verify_directory", sync_start)
+          sync_function = '''fn write_and_sync(
+              fd: OwnedFd,
+              bytes: &[u8],
+              faults: &mut dyn WriteFaultInjector,
+          ) -> Result<(), StateStoreError> {
+              let mut file = File::from(fd);
+              faults.check(WriteFailurePoint::BeforeWrite)?;
+              file.write_all(bytes).map_err(|_| {
+                  StateStoreError::public(
+                      StateStoreErrorKind::Io,
+                      "could not write temporary state file",
+                  )
+              })?;
+              faults.check(WriteFailurePoint::BeforeFileSync)?;
+              fs::fsync(&file).map_err(|_| {
+                  StateStoreError::public(
+                      StateStoreErrorKind::Io,
+                      "could not synchronize temporary state file",
+                  )
+              })
+          }
+          '''
+          text = text[:sync_start] + sync_function + text[sync_end:]
+
+          import_old = "    use super::{LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX};"
+          import_new = '''    use super::{
+              LOCK_FILE_NAME, LinuxStateRoot, TEMP_FILE_PREFIX, WriteFailurePoint,
+              WriteFaultInjector,
+          };'''
+          if text.count(import_old) != 1:
+              raise SystemExit("expected one linux-state test import")
+          text = text.replace(import_old, import_new, 1)
+
+          store_import_old = '''        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreErrorKind,
+              StateWriteDisposition,
+          };'''
+          store_import_new = '''        MAX_STATE_DOCUMENT_BYTES, StateRead, StateRecord, StateStoreError,
+              StateStoreErrorKind, StateWriteDisposition,
+          };'''
+          if text.count(store_import_old) != 1:
+              raise SystemExit("expected one state-store test import")
+          text = text.replace(store_import_old, store_import_new, 1)
+
+          first_test = text.index("    #[test]\n    fn reads_regular_file_through_canonical_components()")
+          test_support = '''    struct FailAt(WriteFailurePoint);
+
+          impl WriteFaultInjector for FailAt {
+              fn check(&mut self, point: WriteFailurePoint) -> Result<(), StateStoreError> {
+                  if point != self.0 {
+                      return Ok(());
+                  }
+                  let message = match point {
+                      WriteFailurePoint::BeforeWrite => {
+                          "injected state-write failure before temporary-file write"
+                      }
+                      WriteFailurePoint::BeforeFileSync => {
+                          "injected state-write failure before temporary-file synchronization"
+                      }
+                      WriteFailurePoint::BeforeRename => {
+                          "injected state-write failure before publication rename"
+                      }
+                      WriteFailurePoint::BeforeParentSync => {
+                          "state file was published before an injected parent-sync failure"
+                      }
+                  };
+                  Err(StateStoreError::public(StateStoreErrorKind::Io, message))
+              }
+          }
+
+          fn assert_no_temporary_files(parent: &Path) {
+              assert!(
+                  fs::read_dir(parent)
+                      .expect("list state directory")
+                      .all(|entry| !entry
+                          .expect("directory entry")
+                          .file_name()
+                          .to_string_lossy()
+                          .starts_with(TEMP_FILE_PREFIX))
+              );
+          }
+
+          '''
+          text = text[:first_test] + test_support + text[first_test:]
+
+          boundary_test = text.index(
+              "    #[test]\n    fn write_requires_prepared_parents_and_rejects_destination_symlink()"
+          )
+          fault_tests = '''    #[test]
+          fn prepublication_failures_preserve_existing_state_and_remove_temporary_files() {
+              for point in [
+                  WriteFailurePoint::BeforeWrite,
+                  WriteFailurePoint::BeforeFileSync,
+                  WriteFailurePoint::BeforeRename,
+              ] {
+                  let root = TempTree::new(&format!("prepublication-{point:?}"));
+                  let parent = create_project_parent(root.path());
+                  let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+                  let original = project_record("example/original");
+                  store.write_atomic(&original).expect("write original state");
+
+                  let replacement = project_record("example/replacement");
+                  let error = store
+                      .write_atomic_with_faults(&replacement, &mut FailAt(point))
+                      .expect_err("injected prepublication failure must fail");
+                  assert_eq!(error.kind(), StateStoreErrorKind::Io);
+                  assert_eq!(
+                      store.read(original.path()).expect("read preserved state"),
+                      StateRead::Present(original.bytes().to_vec())
+                  );
+                  assert_no_temporary_files(&parent);
+              }
+          }
+
+          #[test]
+          fn parent_sync_failure_reports_published_state_and_removes_temporary_file() {
+              let root = TempTree::new("parent-sync-failure");
+              let parent = create_project_parent(root.path());
+              let mut store = LinuxStateRoot::open(root.path()).expect("open state root");
+              let original = project_record("example/original");
+              store.write_atomic(&original).expect("write original state");
+
+              let replacement = project_record("example/replacement");
+              let error = store
+                  .write_atomic_with_faults(
+                      &replacement,
+                      &mut FailAt(WriteFailurePoint::BeforeParentSync),
+                  )
+                  .expect_err("injected parent-sync failure must fail");
+              assert_eq!(error.kind(), StateStoreErrorKind::Io);
+              assert!(error.message().contains("published"));
+              assert_eq!(
+                  store.read(replacement.path()).expect("read published state"),
+                  StateRead::Present(replacement.bytes().to_vec())
+              );
+              assert_no_temporary_files(&parent);
+          }
+
+          '''
+          text = text[:boundary_test] + fault_tests + text[boundary_test:]
+
+          path.write_text(text, encoding="utf-8")
+          PY
+          rustfmt --edition 2024 src/linux_state.rs
+          test "$(git diff --name-only)" = "src/linux_state.rs"
+          git diff --check
+
+      - name: Commit the bounded patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/linux_state.rs
+          git commit -m 'test: inject atomic state-write failures'
+          git push origin HEAD:test/atomic-state-failure-phases
