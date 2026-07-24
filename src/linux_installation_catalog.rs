@@ -243,7 +243,7 @@ mod tests {
     use crate::ownership::ProjectIdentity;
     use crate::state::InstallationId;
     use crate::state_document::ProjectStateDocument;
-    use crate::state_store::{StateRecord, StateStore, StateStoreErrorKind};
+    use crate::state_store::{StateRecord, StateStoreErrorKind};
 
     use super::{InstallationLookup, PROJECT_FILE, find_installation};
 
