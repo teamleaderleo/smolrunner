@@ -10,6 +10,9 @@ pub mod lane_executable;
 /// Read-only, fail-closed lookup of persisted project installations.
 #[cfg(target_os = "linux")]
 pub mod linux_installation_catalog;
+/// Nonblocking coordination for installation-catalog discovery and creation.
+#[cfg(target_os = "linux")]
+pub mod linux_installation_catalog_lock;
 #[cfg(target_os = "linux")]
 pub mod linux_state;
 #[cfg(target_os = "linux")]
