@@ -116,37 +116,24 @@ pub fn publish_new_installation(
         invalid_project_error("project state could not be encoded for installation publication")
     })?;
 
-    inspect_directory(
-        catalog_lock.root(),
-        "state root",
-        catalog_lock.owner(),
-    )?;
+    inspect_directory(catalog_lock.root(), "state root", catalog_lock.owner())?;
     let installations = ensure_fixed_directory(
         catalog_lock.root(),
         INSTALLATIONS_DIRECTORY,
         catalog_lock.owner(),
     )?;
-    let staging = ensure_fixed_directory(
-        catalog_lock.root(),
-        STAGING_DIRECTORY,
-        catalog_lock.owner(),
-    )?;
-    let mut staged = create_staged_installation(
-        staging.as_fd(),
-        &installation_id,
-        catalog_lock.owner(),
-    )?;
+    let staging =
+        ensure_fixed_directory(catalog_lock.root(), STAGING_DIRECTORY, catalog_lock.owner())?;
+    let mut staged =
+        create_staged_installation(staging.as_fd(), &installation_id, catalog_lock.owner())?;
 
     let resources = create_empty_directory(
         staged.directory(),
         RESOURCES_DIRECTORY,
         catalog_lock.owner(),
     )?;
-    let journals = create_empty_directory(
-        staged.directory(),
-        JOURNALS_DIRECTORY,
-        catalog_lock.owner(),
-    )?;
+    let journals =
+        create_empty_directory(staged.directory(), JOURNALS_DIRECTORY, catalog_lock.owner())?;
     write_project_document(staged.directory(), encoded.as_bytes(), catalog_lock.owner())?;
 
     synchronize_directory(&resources, "resource state directory")?;
@@ -276,9 +263,8 @@ fn write_project_document(
         PRIVATE_FILE_MODE,
     )
     .map_err(map_project_create_error)?;
-    fs::fchmod(&project, PRIVATE_FILE_MODE).map_err(|_| {
-        io_error("could not set private project-state permissions")
-    })?;
+    fs::fchmod(&project, PRIVATE_FILE_MODE)
+        .map_err(|_| io_error("could not set private project-state permissions"))?;
     inspect_project_file(project.as_fd(), owner, 0)?;
 
     let mut project = File::from(project);
@@ -295,8 +281,8 @@ fn inspect_directory(
     subject: &str,
     owner: (u32, u32),
 ) -> Result<(), InstallationPublicationError> {
-    let stat = fs::fstat(directory)
-        .map_err(|_| io_error(format!("could not inspect {subject}")))?;
+    let stat =
+        fs::fstat(directory).map_err(|_| io_error(format!("could not inspect {subject}")))?;
     if !FileType::from_raw_mode(stat.st_mode).is_dir() {
         return Err(unsafe_error(format!("{subject} is not a directory")));
     }
@@ -622,13 +608,12 @@ mod tests {
             runner_scope: RunnerScope::Repository,
             runner_user: "project-runner".to_owned(),
         };
-        let error = publish_new_installation(
-            &lock,
-            installation_id("3333333333333333"),
-            invalid,
-        )
-        .expect_err("invalid project must fail");
-        assert_eq!(error.kind(), InstallationPublicationErrorKind::InvalidProject);
+        let error = publish_new_installation(&lock, installation_id("3333333333333333"), invalid)
+            .expect_err("invalid project must fail");
+        assert_eq!(
+            error.kind(),
+            InstallationPublicationErrorKind::InvalidProject
+        );
         assert!(!root.path().join(INSTALLATIONS_DIRECTORY).exists());
         assert!(!root.path().join(STAGING_DIRECTORY).exists());
     }
@@ -639,8 +624,7 @@ mod tests {
         let id = installation_id("4444444444444444");
         let staging = root.path().join(STAGING_DIRECTORY);
         fs::create_dir(&staging).expect("create staging directory");
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o750))
-            .expect("set staging mode");
+        fs::set_permissions(&staging, fs::Permissions::from_mode(0o750)).expect("set staging mode");
         let stale = staging.join(id.as_str());
         fs::create_dir(&stale).expect("create stale staging entry");
         fs::set_permissions(&stale, fs::Permissions::from_mode(0o750))
@@ -650,7 +634,13 @@ mod tests {
         let error = publish_new_installation(&lock, id, project("example/project"))
             .expect_err("stale staging ID must fail");
         assert_eq!(error.kind(), InstallationPublicationErrorKind::IdCollision);
-        assert!(!root.path().join(INSTALLATIONS_DIRECTORY).join("4444444444444444").exists());
+        assert!(
+            !root
+                .path()
+                .join(INSTALLATIONS_DIRECTORY)
+                .join("4444444444444444")
+                .exists()
+        );
     }
 
     #[test]
