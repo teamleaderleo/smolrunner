@@ -81,7 +81,10 @@ pub mod linux_state;
 pub mod linux_state_prepare;
 #[cfg(target_os = "linux")]
 pub mod linux_state_recovery;
+pub mod mac_auto_availability;
+pub mod mac_auto_controller;
 pub mod mac_availability;
+pub mod macos_operator_activity;
 pub mod macos_resource_observation;
 pub mod manifest;
 /// Pure schema-versioned personal-worker operator configuration and public identity.
