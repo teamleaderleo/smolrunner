@@ -161,7 +161,7 @@ impl HotIndexServiceState {
 pub enum HotExecutionResultClass {
     Succeeded,
     Failed,
-    Cancelled,
+    Canceled,
     ResetRequired,
     Unknown,
 }
@@ -171,7 +171,7 @@ impl HotExecutionResultClass {
         match self {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "canceled",
             Self::ResetRequired => "reset_required",
             Self::Unknown => "unknown",
         }
@@ -461,6 +461,7 @@ impl HotExecutionResourceObservation {
 pub struct HotExecutionPerformanceIdentity {
     workload_id: HotExecutionPerformanceToken,
     project_id: HotExecutionPerformanceToken,
+    candidate_id: HotExecutionPerformanceToken,
     backend_id: HotExecutionPerformanceToken,
     host_class: HotExecutionPerformanceToken,
     resource_profile: HotExecutionPerformanceToken,
@@ -469,12 +470,17 @@ pub struct HotExecutionPerformanceIdentity {
 impl HotExecutionPerformanceIdentity {
     /// Construct content-minimised comparison identity for one hot-execution sample.
     ///
+    /// The candidate identifies the optimization under test independently from the execution
+    /// backend, so a filesystem, worktree, cache, or backend experiment can change one dimension at
+    /// a time.
+    ///
     /// # Errors
     ///
     /// Returns a bounded error unless every identity is a compact lowercase ASCII token.
     pub fn new(
         workload_id: &str,
         project_id: &str,
+        candidate_id: &str,
         backend_id: &str,
         host_class: &str,
         resource_profile: &str,
@@ -482,6 +488,7 @@ impl HotExecutionPerformanceIdentity {
         Ok(Self {
             workload_id: HotExecutionPerformanceToken::parse(workload_id)?,
             project_id: HotExecutionPerformanceToken::parse(project_id)?,
+            candidate_id: HotExecutionPerformanceToken::parse(candidate_id)?,
             backend_id: HotExecutionPerformanceToken::parse(backend_id)?,
             host_class: HotExecutionPerformanceToken::parse(host_class)?,
             resource_profile: HotExecutionPerformanceToken::parse(resource_profile)?,
@@ -496,6 +503,11 @@ impl HotExecutionPerformanceIdentity {
     #[must_use]
     pub fn project_id(&self) -> &str {
         self.project_id.as_str()
+    }
+
+    #[must_use]
+    pub fn candidate_id(&self) -> &str {
+        self.candidate_id.as_str()
     }
 
     #[must_use]
@@ -625,9 +637,10 @@ impl HotExecutionPerformanceReceipt {
     #[must_use]
     pub fn render_human(&self) -> String {
         let mut output = format!(
-            "hot execution performance\nworkload: {}\nproject: {}\nmode: {}\nbackend: {}\nhost: {}\nresource profile: {}\nresult: {}\ntotal: {} ms\nfirst useful command: {}\nfirst relevant result: {}\nfinal relevant result: {}\n",
+            "hot execution performance\nworkload: {}\nproject: {}\ncandidate: {}\nmode: {}\nbackend: {}\nhost: {}\nresource profile: {}\nresult: {}\ntotal: {} ms\nfirst useful command: {}\nfirst relevant result: {}\nfinal relevant result: {}\n",
             self.identity.workload_id(),
             self.identity.project_id(),
+            self.identity.candidate_id(),
             self.execution_mode.as_str(),
             self.identity.backend_id(),
             self.identity.host_class(),
@@ -772,7 +785,8 @@ mod tests {
             HotExecutionPerformanceIdentity::new(
                 "quarry-edit-test",
                 "quarry",
-                "lima-vz-xfs",
+                "project-disk-xfs-reflink",
+                "lima-vz",
                 "apple-silicon-24g",
                 "medium-4c-8g",
             )
@@ -830,7 +844,7 @@ mod tests {
         assert_eq!(receipt.total_elapsed_millis(), 2_800);
         assert_eq!(
             receipt.render_human(),
-            "hot execution performance\nworkload: quarry-edit-test\nproject: quarry\nmode: resident_task_loop\nbackend: lima-vz-xfs\nhost: apple-silicon-24g\nresource profile: medium-4c-8g\nresult: succeeded\ntotal: 2800 ms\nfirst useful command: 12 ms\nfirst relevant result: 2420 ms\nfinal relevant result: 2760 ms\nheat: sandbox=resident_hit repository=task_fork dependency=environment_hit build=incremental_hit index_service=resident_hit\n"
+            "hot execution performance\nworkload: quarry-edit-test\nproject: quarry\ncandidate: project-disk-xfs-reflink\nmode: resident_task_loop\nbackend: lima-vz\nhost: apple-silicon-24g\nresource profile: medium-4c-8g\nresult: succeeded\ntotal: 2800 ms\nfirst useful command: 12 ms\nfirst relevant result: 2420 ms\nfinal relevant result: 2760 ms\nheat: sandbox=resident_hit repository=task_fork dependency=environment_hit build=incremental_hit index_service=resident_hit\n"
         );
 
         let first = receipt.render_json().expect("receipt serializes");
@@ -838,7 +852,11 @@ mod tests {
         assert_eq!(first, second);
         let parsed: serde_json::Value = serde_json::from_str(&first).expect("JSON parses");
         assert_eq!(parsed["authority"], "observation_only");
-        assert_eq!(parsed["identity"]["backend_id"], "lima-vz-xfs");
+        assert_eq!(
+            parsed["identity"]["candidate_id"],
+            "project-disk-xfs-reflink"
+        );
+        assert_eq!(parsed["identity"]["backend_id"], "lima-vz");
         assert_eq!(parsed["milestones"]["first_useful_command_millis"], 12);
         assert_eq!(parsed["storage"]["guest_logical_bytes"], 9_000_000_000_u64);
         assert_eq!(parsed["storage"]["guest_allocated_bytes"], 2_000_000_000_u64);
@@ -852,6 +870,7 @@ mod tests {
         let error = HotExecutionPerformanceIdentity::new(
             secret_like,
             "quarry",
+            "baseline",
             "lima-vz",
             "apple-silicon",
             "medium",
@@ -893,6 +912,7 @@ mod tests {
             HotExecutionPerformanceIdentity::new(
                 "smolrunner-edit-test",
                 "smolrunner",
+                "baseline",
                 "lima-vz",
                 "apple-silicon",
                 "medium",
@@ -952,7 +972,8 @@ mod tests {
             HotExecutionPerformanceIdentity::new(
                 "cold-baseline",
                 "smolrunner",
-                "lima-vz-ext4",
+                "baseline",
+                "lima-vz",
                 "apple-silicon",
                 "small",
             )
