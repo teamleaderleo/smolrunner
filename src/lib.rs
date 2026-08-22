@@ -82,6 +82,8 @@ pub mod github_workflow_job_mapper;
 /// Pure, bounded normalization of complete GitHub workflow-job reconciliation snapshots.
 pub mod github_workflow_job_reconciliation;
 pub mod host;
+/// Pure bounded observation-only receipts for blazingly hot execution measurements.
+pub mod hot_execution_performance;
 #[cfg(target_os = "linux")]
 pub mod host_package_plan;
 #[cfg(target_os = "linux")]
