@@ -299,7 +299,10 @@ impl HotExecutionMilestones {
         })
     }
 
-    fn validate_total(&self, total_elapsed_millis: u64) -> Result<(), HotExecutionPerformanceError> {
+    fn validate_total(
+        &self,
+        total_elapsed_millis: u64,
+    ) -> Result<(), HotExecutionPerformanceError> {
         for value in [
             self.sandbox_ready_millis,
             self.repository_ready_millis,
@@ -859,9 +862,15 @@ mod tests {
         assert_eq!(parsed["identity"]["backend_id"], "lima-vz");
         assert_eq!(parsed["milestones"]["first_useful_command_millis"], 12);
         assert_eq!(parsed["storage"]["guest_logical_bytes"], 9_000_000_000_u64);
-        assert_eq!(parsed["storage"]["guest_allocated_bytes"], 2_000_000_000_u64);
+        assert_eq!(
+            parsed["storage"]["guest_allocated_bytes"],
+            2_000_000_000_u64
+        );
         assert_eq!(parsed["storage"]["host_backing_bytes"], 1_200_000_000_u64);
-        assert_eq!(parsed["storage"]["task_materialization_bytes"], 14_000_000_u64);
+        assert_eq!(
+            parsed["storage"]["task_materialization_bytes"],
+            14_000_000_u64
+        );
     }
 
     #[test]
@@ -883,31 +892,14 @@ mod tests {
 
     #[test]
     fn milestone_order_and_terminal_bound_are_checked() {
-        let order_error = HotExecutionMilestones::new(
-            Some(10),
-            Some(9),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .expect_err("decreasing milestone is refused");
-        assert_eq!(
-            order_error.code(),
-            "performance_milestone_order_invalid"
-        );
+        let order_error =
+            HotExecutionMilestones::new(Some(10), Some(9), None, None, None, None, None)
+                .expect_err("decreasing milestone is refused");
+        assert_eq!(order_error.code(), "performance_milestone_order_invalid");
 
-        let milestones = HotExecutionMilestones::new(
-            Some(1),
-            None,
-            None,
-            Some(20),
-            None,
-            None,
-            None,
-        )
-        .expect("milestones are internally monotonic");
+        let milestones =
+            HotExecutionMilestones::new(Some(1), None, None, Some(20), None, None, None)
+                .expect("milestones are internally monotonic");
         let error = HotExecutionPerformanceReceipt::new(
             HotExecutionPerformanceIdentity::new(
                 "smolrunner-edit-test",
@@ -948,10 +940,7 @@ mod tests {
             None,
         )
         .expect_err("oversized milestone is refused");
-        assert_eq!(
-            milestone_error.code(),
-            "performance_duration_out_of_range"
-        );
+        assert_eq!(milestone_error.code(), "performance_duration_out_of_range");
 
         let storage_error = HotExecutionStorageObservation::new(
             Some(MAX_HOT_EXECUTION_OBSERVED_BYTES + 1),
@@ -960,10 +949,7 @@ mod tests {
             None,
         )
         .expect_err("oversized storage observation is refused");
-        assert_eq!(
-            storage_error.code(),
-            "performance_observation_out_of_range"
-        );
+        assert_eq!(storage_error.code(), "performance_observation_out_of_range");
     }
 
     #[test]
@@ -997,7 +983,11 @@ mod tests {
 
         assert!(receipt.storage().is_none());
         assert!(receipt.resources().is_none());
-        assert!(receipt.render_human().contains("first useful command: unknown"));
+        assert!(
+            receipt
+                .render_human()
+                .contains("first useful command: unknown")
+        );
         let json = receipt.render_json().expect("receipt serializes");
         assert!(!json.contains("\"storage\""));
         assert!(!json.contains("\"resources\""));
